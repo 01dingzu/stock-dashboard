@@ -3,7 +3,7 @@
 const { chromium } = require('C:/Users/liusiying/.workbuddy/binaries/node/workspace/node_modules/playwright-core');
 
 const EXE = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const BASE = 'http://localhost:4174/';
+const BASE = 'https://01dingzu.github.io/stock-dashboard/';
 const errors = [];
 const logs = [];
 
