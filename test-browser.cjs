@@ -14,9 +14,12 @@ async function shot(page, name) {
 
 (async () => {
   const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
-  // 防 PWA service worker 缓存干扰 E2E
-  await page.route('**/sw.js', (route) => route.fulfill({ status: 404, body: '' }));
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+    serviceWorkers: 'block',  // 关键：屏蔽 SW 缓存，确保每次拉到线上最新 JS
+  });
+  const page = await context.newPage();
   page.on('console', (m) => { console.log('CONSOLE', m.type(), m.text().slice(0, 250)); if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => { console.log('PAGEERROR', e.message.slice(0, 300)); errors.push('PAGEERROR: ' + e.message); });
   page.on('requestfailed', (r) => console.log('REQFAIL', r.url(), r.failure()?.errorText));
