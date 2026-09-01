@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sys
+import time
 
 import pandas as pd
 
@@ -28,10 +29,29 @@ CACHE_DIR = os.path.join(DATA_DIR, "market_cache")
 MIN_LIST_DAYS = 365        # 剔除上市不足 1 年（财报参考价值低）
 ST_KEYS = ("ST", "退", "N ")  # 剔除 ST / 退市整理 / 上市首日
 _PFX = re.compile(r"^[A-Za-z0-9]+")  # 行业名去前缀（如 "J66货币金融服务" → "货币金融服务"）
+_NET_ERR = ("10002007", "10001001", "WinError 10054")  # 网络接收错误 / 会话断开 / 连接被重置
+_RETRY = 3                    # 网络类错误重试次数（强制重登 + 递增等待）
 
 
 def clean_industry(s: str) -> str:
     return _PFX.sub("", s or "").strip()
+
+
+def _fetch_daily_retry(code: str) -> "pd.DataFrame":
+    """拉行情；网络类错误（BaoStock 10002007 / WinError 10054）强制重登并重试。"""
+    last = None
+    for attempt in range(_RETRY):
+        try:
+            return bf.fetch_daily(code, days=10)
+        except RuntimeError as e:
+            msg = str(e)
+            if not any(k in msg for k in _NET_ERR):
+                raise
+            last = e
+            if attempt < _RETRY - 1:
+                bf._refresh_session_if_needed(force=True)  # 会话可能已坏，强制重登
+                time.sleep(3 * (attempt + 1))
+    raise last
 
 
 # ---------------- 数据拉取 ----------------
@@ -104,7 +124,7 @@ def fetch_one(code: str) -> dict | None:
     np_ = profit.get("netProfit")
     ts = profit.get("totalShare")
 
-    daily = bf.fetch_daily(code, days=10)
+    daily = _fetch_daily_retry(code)
     if daily.empty:
         return None
     close = float(daily.iloc[-1]["close"])
@@ -165,6 +185,7 @@ def main() -> None:
 
         rows = []
         skipped = 0
+        failed = []
         for i, item in enumerate(universe, 1):
             code = item["code"]
             cache_f = os.path.join(CACHE_DIR, f"{code.replace('.', '')}.json")
@@ -173,7 +194,13 @@ def main() -> None:
                     rows.append(json.load(f))
                 skipped += 1
                 continue
-            rec = fetch_one(code)
+            try:
+                rec = fetch_one(code)
+            except Exception as e:  # noqa: BLE001 —— 单只失败跳过，绝不中断全扫描
+                failed.append({"code": code, "name": item["name"], "err": str(e)[:120]})
+                if len(failed) <= 10 or len(failed) % 50 == 0:
+                    print(f"  ✗ 跳过 {code} {item['name']}: {str(e)[:100]}", flush=True)
+                continue
             if rec:
                 rec["name"] = item["name"]
                 rec["industry"] = clean_industry(ind_map.get(code, ""))
@@ -181,9 +208,15 @@ def main() -> None:
                     json.dump(rec, f, ensure_ascii=False)
                 rows.append(rec)
             if i % 100 == 0:
-                print(f"  进度 {i}/{len(universe)}（缓存跳过 {skipped}）", flush=True)
+                print(f"  进度 {i}/{len(universe)}（缓存跳过 {skipped}，失败 {len(failed)}）", flush=True)
 
-        print(f"扫描完成：有效 {len(rows)} 只（跳过缓存 {skipped}）", flush=True)
+        print(f"扫描完成：有效 {len(rows)} 只（跳过缓存 {skipped}，失败 {len(failed)}）", flush=True)
+        if failed:
+            print("失败清单（重跑本脚本将自动补齐）：", flush=True)
+            for f_ in failed[:20]:
+                print(f"  - {f_['code']} {f_['name']}: {f_['err']}", flush=True)
+            if len(failed) > 20:
+                print(f"  ... 共 {len(failed)} 只失败", flush=True)
         top = rank_market(rows, top_n=50)
         payload = {
             "updated": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
