@@ -37,6 +37,7 @@ export default function App() {
   }, [])
 
   const updated = watchlist?.updated
+  const watchlistCodes = new Set(watchlist?.stocks.map((s) => s.code) ?? [])
 
   return (
     <div className="app">
@@ -54,10 +55,21 @@ export default function App() {
         {selected && <button className="back-btn" onClick={() => (location.hash = '#/')}>‹ 返回</button>}
       </header>
 
-      {error && <div className="error">⚠ {error}<br />数据可能尚未生成，先运行 pipeline/main.py 或等待 GitHub Actions。</div>}
+      {error && (
+        <div className="error">
+          ⚠ {error}
+          <br />
+          {error.includes('加载失败') ? '该股可能不在自选池中。先在自选池页面加入，或等待 pipeline/main.py 生成数据。' : '数据可能尚未生成，先运行 pipeline/main.py 或等待 GitHub Actions。'}
+        </div>
+      )}
       {loading && !stock && route.view === 'list' && <div className="loading">加载中…</div>}
 
-      {!selected && route.view === 'market' && <MarketRankView onSelect={(code) => (location.hash = `#/stock/${code}`)} />}
+      {!selected && route.view === 'market' && (
+        <MarketRankView
+          watchlistCodes={watchlistCodes}
+          onSelect={(code) => (location.hash = `#/stock/${code}`)}
+        />
+      )}
       {!selected && route.view === 'list' && watchlist && <StockList watchlist={watchlist} onSelect={(code) => (location.hash = `#/stock/${code}`)} />}
       {selected && stock && <StockDetail data={stock} onBack={() => (location.hash = '#/')} />}
     </div>

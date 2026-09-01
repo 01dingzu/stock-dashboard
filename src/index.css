@@ -72,6 +72,13 @@ body {
 .mk-price { font-size: 15px; font-weight: 700; }
 .mk-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 .mk-score { font-size: 13px; font-weight: 700; color: var(--accent); }
+.mk-item-out { cursor: default; opacity: 0.62; }
+.mk-item-out:active { transform: none; }
+.mk-out-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  background: var(--panel-2); color: var(--text-dim);
+  border: 1px solid var(--line);
+}
 
 /* ---------- stock list ---------- */
 .list { padding: 8px 12px 80px; display: flex; flex-direction: column; gap: 8px; }
