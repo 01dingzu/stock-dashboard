@@ -38,6 +38,13 @@ export default function StockDetail({ data, onBack }: Props) {
         <Fact label="市值(亿)" value={fmtNum(data.fundamentals.mktcap, 0)} />
       </div>
 
+      {data.commentary && (
+        <div className="chart-card">
+          <div className="title">综合说明（基本面 + 技术面）</div>
+          <div className="commentary">{data.commentary}</div>
+        </div>
+      )}
+
       <div className="chart-card">
         <div className="title">
           日K · 均线 · 成交量

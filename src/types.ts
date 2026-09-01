@@ -67,4 +67,5 @@ export interface StockData {
   kdj: KdjPoint[]
   factors: Factor[]
   fundamentals: Record<string, number | string | null>
+  commentary?: string | null
 }

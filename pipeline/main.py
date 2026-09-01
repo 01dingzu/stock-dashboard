@@ -14,6 +14,7 @@ import os
 from config import DATA_DIR, KLINE_DAYS, WATCHLIST
 from indicators import compute_all
 import baostock_fetch as bf
+import commentary
 
 
 def _r(x, nd=4):
@@ -111,6 +112,7 @@ def main():
         try:
             print(f"[{i}/{len(WATCHLIST)}] {name} ({code}) ...", flush=True)
             stock = build_stock_json(code, name, industry)
+            stock["commentary"] = commentary.safe_commentary(stock)
             fname = code.replace(".", "")
             with open(f"{DATA_DIR}/stocks/{fname}.json", "w", encoding="utf-8") as f:
                 json.dump(stock, f, ensure_ascii=False, default=json_default)
@@ -143,8 +145,10 @@ def main():
     with open(f"{DATA_DIR}/watchlist.json", "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, default=json_default)
 
+    commentary.main()
+
     print(f"\n完成：{len(watch)}/{len(WATCHLIST)} 只入库，失败 {len(errors)}: {errors}")
-    print("产出：data/watchlist.json + data/stocks/*.json")
+    print("产出：data/watchlist.json + data/stocks/*.json + data/commentary.json")
 
 
 if __name__ == "__main__":
