@@ -21,7 +21,6 @@ export default function StockDetail({ data, onBack }: Props) {
   return (
     <div className="detail">
       <div className="detail-head">
-        <button className="back-btn" onClick={onBack}>‹ 列表</button>
         <div className="nm">{meta.name}</div>
         <span className="cd">{meta.code.replace(/(sh|sz)\./, '')}</span>
         <span className="ind">{meta.industry}</span>

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from './store'
 import StockList from './components/StockList'
 import StockDetail from './components/StockDetail'
@@ -11,20 +11,18 @@ function parseHash(): string | null {
 
 export default function App() {
   const { watchlist, stock, loading, error, loadWatchlist, loadStock } = useStore()
-  const selected = parseHash()
+  const [selected, setSelected] = useState<string | null>(parseHash())
 
   useEffect(() => {
     loadWatchlist()
-    const onHash = () => {
-      const code = parseHash()
-      if (code) loadStock(code)
-    }
+    const onHash = () => setSelected(parseHash())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
-  }, [loadWatchlist, loadStock])
+  }, [loadWatchlist])
 
   useEffect(() => {
     if (selected) loadStock(selected)
+    else useStore.setState({ stock: null })
   }, [selected, loadStock])
 
   // Service Worker（PWA 离线缓存）

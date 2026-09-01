@@ -51,11 +51,10 @@ export default function FundCard({ data }: Props) {
       <div className="fund-grid">
         {ROWS.map((r) => {
           const v = f[r.key]
-          const cls = v != null && r.percent ? upDownClass(Number(v)) : ''
           return (
             <div className="fund-item" key={r.key}>
               <span className="k">{r.label} {r.note ? <span className="note">{r.note}</span> : null}</span>
-              <span className={`v ${cls}`}>
+              <span className="v">
                 {r.percent ? fmtPct(v as number) : fmtNum(v as number, r.digits ?? 2)}
               </span>
             </div>
