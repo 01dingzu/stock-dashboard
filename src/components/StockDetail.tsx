@@ -33,7 +33,7 @@ export default function StockDetail({ data, onBack }: Props) {
 
       <div className="facts">
         <Fact label="PE(TTM)" value={fmtNum(data.fundamentals.pe_ttm)} />
-        <Fact label="PB≈" value={fmtNum(data.fundamentals.pb_est)} />
+        <Fact label="PB" value={fmtNum(data.fundamentals.pb)} />
         <Fact label="ROE" value={fmtPct(data.fundamentals.roe as number)} />
         <Fact label="市值(亿)" value={fmtNum(data.fundamentals.mktcap, 0)} />
       </div>
@@ -73,7 +73,7 @@ export default function StockDetail({ data, onBack }: Props) {
       )}
 
       <div className="note-banner">
-        数据源：BaoStock（收盘后日线 + 季报），每日自动更新。PB 为 PE×ROE 估算值，仅供参考。
+        数据源：BaoStock（收盘后日线 + 季报），每日自动更新。PB 为披露期净资产反推口径。
         技术信号与打分规则在回测验证通过前仅作观察，不构成买卖结论。
       </div>
     </div>
