@@ -7,5 +7,6 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
+    emptyOutDir: false, // safe-delete shim intercepts rmSync; clear dist manually
   },
 })
