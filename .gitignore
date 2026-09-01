@@ -7,5 +7,6 @@ __pycache__/
 *.tsbuildinfo
 .DS_Store
 data/backtest_cache/
+data/market_cache/
 
 shot-*.png

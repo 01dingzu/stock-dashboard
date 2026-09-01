@@ -1,0 +1,57 @@
+{
+ "updated": "2026-09-01 19:24",
+ "source": "BaoStock 全市场因子扫描 MVP",
+ "note": "PE/PB 越低分越高、ROE 越高分越高（权重 0.4/0.3/0.3）；仅作观察，不构成投资建议",
+ "count": 4,
+ "universe": 5,
+ "stocks": [
+  {
+   "rank": 1,
+   "code": "sh.600000",
+   "name": "浦发银行",
+   "industry": "J66货币金融服务",
+   "close": 9.35,
+   "pe": 6.08,
+   "pb": 0.37,
+   "roe": 3.75,
+   "report": "2026Q2",
+   "score": 0.75
+  },
+  {
+   "rank": 2,
+   "code": "sh.600008",
+   "name": "首创环保",
+   "industry": "D46水的生产和供应业",
+   "close": 2.81,
+   "pe": 12.26,
+   "pb": 0.48,
+   "roe": 2.72,
+   "report": "2026Q2",
+   "score": 0.5
+  },
+  {
+   "rank": 3,
+   "code": "sh.600007",
+   "name": "中国国贸",
+   "industry": "K70房地产业",
+   "close": 19.07,
+   "pe": 15.96,
+   "pb": 2.02,
+   "roe": 6.65,
+   "report": "2026Q2",
+   "score": 0.4
+  },
+  {
+   "rank": 4,
+   "code": "sh.600004",
+   "name": "白云机场",
+   "industry": "G56航空运输业",
+   "close": 7.81,
+   "pe": 17.58,
+   "pb": 0.9,
+   "roe": 2.04,
+   "report": "2026Q2",
+   "score": 0.15
+  }
+ ]
+}

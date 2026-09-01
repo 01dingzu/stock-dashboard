@@ -22,6 +22,28 @@ export interface Watchlist {
   stocks: WatchItem[]
 }
 
+export interface MarketItem {
+  rank: number
+  code: string
+  name: string
+  industry: string
+  close: number | null
+  pe: number | null
+  pb: number | null
+  roe: number | null
+  report: string
+  score: number
+}
+
+export interface MarketRank {
+  updated: string
+  source: string
+  note: string
+  count: number
+  universe: number
+  stocks: MarketItem[]
+}
+
 export interface KBar {
   d: string
   o: number

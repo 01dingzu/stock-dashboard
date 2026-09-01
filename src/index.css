@@ -46,6 +46,32 @@ body {
   border: 1px solid var(--line); border-radius: 8px;
   padding: 6px 12px; font-size: 13px; cursor: pointer;
 }
+.back-btn.mk-nav { color: var(--accent); border-color: var(--accent); white-space: nowrap; }
+
+/* ---------- market rank ---------- */
+.market { padding: 8px 12px 80px; }
+.mk-list { display: flex; flex-direction: column; gap: 8px; }
+.mk-item {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 10px 12px; cursor: pointer;
+}
+.mk-item:active { transform: scale(0.99); }
+.mk-rank {
+  width: 26px; height: 26px; flex: none; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: var(--text-dim);
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.mk-item:nth-child(-n+3) .mk-rank { color: var(--up); border-color: var(--up); }
+.mk-main { flex: 1; min-width: 0; }
+.mk-name { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.mk-code { font-size: 11px; color: var(--text-dim); font-weight: 400; }
+.mk-ind { font-size: 11px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-nums { text-align: right; }
+.mk-price { font-size: 15px; font-weight: 700; }
+.mk-meta { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.mk-score { font-size: 13px; font-weight: 700; color: var(--accent); }
 
 /* ---------- stock list ---------- */
 .list { padding: 8px 12px 80px; display: flex; flex-direction: column; gap: 8px; }
