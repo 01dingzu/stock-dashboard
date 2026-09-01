@@ -120,8 +120,11 @@ def main():
                 watch.append({
                     "code": code, "name": name, "industry": industry,
                     "price": m.get("price"), "pct": m.get("pct"),
-                    "pe": fnd.get("pe_ttm"), "pb": fnd.get("pb_est"),
+                    "pe": fnd.get("pe_ttm"), "pb": fnd.get("pb"),
                     "roe": fnd.get("roe"), "mktcap": fnd.get("mktcap"),
+                    "div_yield": fnd.get("div_yield"),
+                    "report_period": f"{int(fnd.get('report_year'))}Q{int(fnd.get('report_quarter'))}" if fnd.get("report_year") and fnd.get("report_quarter") else None,
+                    "report_pub": fnd.get("pub_date"),
                     "last_date": m.get("last_date"),
                 })
             else:

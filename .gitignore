@@ -6,3 +6,4 @@ __pycache__/
 *.pyc
 *.tsbuildinfo
 .DS_Store
+data/backtest_cache/

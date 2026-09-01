@@ -10,6 +10,9 @@ export interface WatchItem {
   pb: number | null
   roe: number | null
   mktcap: number | null
+  div_yield: number | null
+  report_period: string | null
+  report_pub: string | null
   last_date: string | null
 }
 

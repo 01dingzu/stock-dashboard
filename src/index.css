@@ -49,6 +49,20 @@ body {
 
 /* ---------- stock list ---------- */
 .list { padding: 8px 12px 80px; display: flex; flex-direction: column; gap: 8px; }
+.sort-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 2px 4px; }
+.sort-chips .chip {
+  font-size: 12px; padding: 4px 10px; border-radius: 14px; cursor: pointer;
+  background: var(--panel); color: var(--text-dim); border: 1px solid var(--line);
+}
+.sort-chips .chip.active { color: var(--up); border-color: var(--up); font-weight: 600; }
+.sort-chips .hint { font-size: 10px; color: var(--text-dim); margin-left: auto; }
+.score-tag {
+  display: inline-block; font-size: 10px; font-weight: 700; border-radius: 8px;
+  padding: 1px 5px; margin-left: 6px; vertical-align: 2px;
+}
+.score-tag.good { color: #15803d; border: 1px solid #22c55e; background: rgba(34, 197, 94, 0.08); }
+.score-tag.mid { color: #b45309; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.08); }
+.score-tag.low { color: #b91c1c; border: 1px solid #ef4444; background: rgba(239, 68, 68, 0.08); }
 .stock-row {
   display: flex; align-items: center; gap: 12px;
   background: var(--panel); border: 1px solid var(--line);
@@ -63,6 +77,16 @@ body {
 .stock-row .price { text-align: right; }
 .stock-row .price .p { font-size: 16px; font-weight: 700; }
 .stock-row .price .chg { font-size: 13px; margin-top: 2px; }
+.div-yield {
+  display: inline-block; font-size: 10px; font-weight: 600; color: var(--up);
+  border: 1px solid var(--up); border-radius: 8px; padding: 1px 5px;
+  margin-left: 6px; vertical-align: 2px;
+}
+.stale-tag {
+  display: inline-block; font-size: 10px; font-weight: 600; color: #b45309;
+  border: 1px solid #f59e0b; border-radius: 8px; padding: 1px 5px;
+  margin-left: 6px; vertical-align: 2px;
+}
 .up { color: var(--up); }
 .down { color: var(--down); }
 .flat { color: var(--text-dim); }

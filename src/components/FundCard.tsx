@@ -22,7 +22,8 @@ interface Props {
 
 const ROWS: { key: string; label: string; note?: string; digits?: number; percent?: boolean }[] = [
   { key: 'pe_ttm', label: 'PE(TTM)', note: '市盈率' },
-  { key: 'pb_est', label: 'PB', note: '≈估算' },
+  { key: 'pb', label: 'PB', note: '市净率' },
+  { key: 'div_yield', label: '股息率', percent: true },
   { key: 'roe', label: 'ROE', note: '净资产收益率', percent: true },
   { key: 'yoy_rev', label: '营收同比', percent: true },
   { key: 'yoy_ni', label: '净利同比', percent: true },

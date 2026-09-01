@@ -17,6 +17,46 @@ import pandas as pd
 # Q1 → 4/30，Q2 → 8/31，Q3 → 10/31，Q4 → 次年 4/30
 _QUARTER_DEADLINE = {1: (4, 30), 2: (8, 31), 3: (10, 31), 4: (4, 30)}
 
+# 会话管理：BaoStock 免费会话在连续调用后会被服务端断开（报 10001001 用户未登录），
+# 定期重登 + 错误触发重连。
+_last_login_at: Optional[dt.datetime] = None
+_calls_since_login = 0
+_LOGIN_CALL_LIMIT = 25        # 每 25 次接口调用重新登录
+_LOGIN_TTL_SECONDS = 240      # 或每 4 分钟重登
+
+
+def _refresh_session_if_needed(force: bool = False):
+    global _last_login_at, _calls_since_login
+    now = dt.datetime.now()
+    need = (
+        force
+        or _last_login_at is None
+        or _calls_since_login >= _LOGIN_CALL_LIMIT
+        or (now - _last_login_at).total_seconds() >= _LOGIN_TTL_SECONDS
+    )
+    if need:
+        if _last_login_at is not None:
+            try:
+                bs.logout()
+            except Exception:
+                pass
+        login()
+        _last_login_at = now
+        _calls_since_login = 0
+    _calls_since_login += 1
+
+
+def _call(api: str, **kwargs):
+    """调用 BaoStock 接口；会话断开（10001001）自动重登并重试一次。"""
+    rs = None
+    for attempt in (1, 2):
+        _refresh_session_if_needed(force=(attempt == 2))
+        rs = getattr(bs, api)(**kwargs)
+        if rs.error_code == "10001001" and attempt == 1:
+            continue
+        return rs
+    return rs
+
 
 def _latest_report_period(today: Optional[dt.date] = None) -> Tuple[int, int]:
     """返回最新「已过披露截止日」的报告期 (year, quarter)。"""
@@ -43,10 +83,10 @@ def fetch_daily(code: str, days: int = 500) -> pd.DataFrame:
     end = dt.date.today()
     start = end - dt.timedelta(days=int(days * 1.6) + 60)  # 宽松起点，覆盖停牌/节假日
     fields = "date,open,high,low,close,preclose,volume,amount,turn,tradestatus,pctChg"
-    rs = bs.query_history_k_data_plus(
-        code, fields, start_date=start.strftime("%Y-%m-%d"),
-        end_date=end.strftime("%Y-%m-%d"), frequency="d",
-        adjustflag="2",  # 2=前复权
+    rs = _call(
+        "query_history_k_data_plus", code=code, fields=fields,
+        start_date=start.strftime("%Y-%m-%d"), end_date=end.strftime("%Y-%m-%d"),
+        frequency="d", adjustflag="2",  # 2=前复权
     )
     df = _rs_to_df(rs)
     if df.empty:
@@ -58,7 +98,7 @@ def fetch_daily(code: str, days: int = 500) -> pd.DataFrame:
 
 
 def _fetch_report(code: str, api: str, year: int, quarter: int) -> Optional[dict]:
-    rs = getattr(bs, api)(code=code, year=year, quarter=quarter)
+    rs = _call(api, code=code, year=year, quarter=quarter)
     if rs.error_code != "0" or not rs.data:
         return None
     fields = rs.fields
@@ -94,6 +134,11 @@ def fetch_fundamentals(code: str) -> dict:
             "mb_revenue": profit.get("MBRevenue"),   # 主营业务收入(元)
             "pub_date": profit.get("pubDate"),
         })
+        # 每股净资产（反推）：净资产 ≈ 净利润 / ROE（同披露期口径），BPS = 净资产 / 总股本
+        np_ = profit.get("netProfit")
+        ts = profit.get("totalShare")
+        if np_ is not None and roe is not None and roe > 0 and ts:
+            res["bps"] = round(np_ / roe / ts, 4)
         # 营收同比：当期 MBRevenue / 去年同期 MBRevenue - 1（×100 输出为百分比）
         prev = _fetch_report(code, "query_profit_data", y - 1, q)
         if prev and profit.get("MBRevenue") and prev.get("MBRevenue"):
@@ -111,29 +156,60 @@ def fetch_fundamentals(code: str) -> dict:
 
     dupont = _fetch_report(code, "query_dupont_data", y, q)
     if dupont:
-        res["dupont_roe"] = dupont.get("dupontROE")  # 用于 PB 估算
+        res["dupont_roe"] = dupont.get("dupontROE")
+
+    res["div_cash_ttm"] = fetch_dividend_ttm(code)  # 最近一年已实施分红每股现金合计
     return res
+
+
+def fetch_dividend_ttm(code: str, days: int = 365) -> Optional[float]:
+    """最近 days 天内已实施分红的每股税前现金合计（元/股）。
+    用于股息率 = 合计 / 最新收盘价。返回 None 表示无分红记录。"""
+    today = dt.date.today()
+    cutoff = (today - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    today_str = today.strftime("%Y-%m-%d")
+    total = 0.0
+    for y in range(today.year, today.year - 3, -1):
+        rs = _call("query_dividend_data", code=code, year=y, yearType="report")
+        if rs.error_code != "0" or not rs.data:
+            continue
+        for row in rs.data:
+            rec = dict(zip(rs.fields, row))
+            op = rec.get("dividOperateDate") or rec.get("dividPayDate") or ""
+            if op and cutoff <= op <= today_str:
+                try:
+                    cash = float(rec.get("dividCashPsBeforeTax") or 0)
+                except (TypeError, ValueError):
+                    cash = 0.0
+                total += cash
+    return round(total, 4) if total > 0 else None
 
 
 def calc_valuation(last_close: float, fund: dict) -> dict:
     """由最新收盘价 + 财报推算估值（BaoStock 无现成 PE/PB 字段）。"""
-    pe_ttm = pb_est = mktcap = None
+    pe_ttm = pb = mktcap = div_yield = None
     eps = fund.get("eps_ttm")
     ts = fund.get("total_share")  # 股
-    roe = fund.get("dupont_roe") or fund.get("roe")
-    if eps:
-        pe_ttm = round(last_close / eps, 2) if eps > 0 else None
-    if pe_ttm and roe:
-        pb_est = round(pe_ttm * roe, 2)  # P/B = P/E × E/B，估算值
+    bps = fund.get("bps")
+    dc = fund.get("div_cash_ttm")
+    if eps and eps > 0:
+        pe_ttm = round(last_close / eps, 2)
+    if bps and bps > 0:
+        pb = round(last_close / bps, 2)  # 真实 PB：收盘价 / 每股净资产
     if ts:
         mktcap = round(last_close * ts / 1e8, 2)  # 亿元
-    return {"pe_ttm": pe_ttm, "pb_est": pb_est, "mktcap": mktcap}
+    if dc and dc > 0 and last_close > 0:
+        div_yield = round(dc / last_close * 100, 2)  # %（每股分红 / 股价）
+    return {"pe_ttm": pe_ttm, "pb": pb, "mktcap": mktcap, "div_yield": div_yield}
 
 
 def login() -> None:
+    global _last_login_at, _calls_since_login
     lg = bs.login()
     if lg.error_code != "0":
         raise RuntimeError(f"BaoStock login failed: {lg.error_code} {lg.error_msg}")
+    _last_login_at = dt.datetime.now()
+    _calls_since_login = 0
 
 
 def logout() -> None:
