@@ -1,0 +1,59 @@
+name: daily-pipeline
+
+on:
+  schedule:
+    - cron: '35 9 * * 1-5'   # 工作日 17:35 北京时间（UTC 09:35），收盘后数据已入库
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pipeline deps
+        run: pip install -r pipeline/requirements.txt
+      - name: Run data pipeline
+        run: python pipeline/main.py
+      - name: Commit data updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet || git commit -m "chore: daily data update $(date +'%Y-%m-%d')"
+          git push
+
+  deploy:
+    needs: pipeline
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install frontend deps
+        run: npm ci --cache ./.npm-cache --no-audit --no-fund || npm install --cache ./.npm-cache --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Bundle data into dist
+        run: cp -r data dist/data
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
