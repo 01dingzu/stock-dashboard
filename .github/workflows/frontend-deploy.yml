@@ -1,0 +1,41 @@
+name: frontend-deploy
+
+# 仅做前端 build + 部署到 GitHub Pages，不重跑数据 pipeline。
+# 用途：UI 微调 / SW 升级 / 入口调整等纯前端变更快速上线。
+# 数据更新请走 daily.yml（pipeline + deploy 串行）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install frontend deps
+        run: npm ci --cache ./.npm-cache --no-audit --no-fund || npm install --cache ./.npm-cache --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Bundle data into dist
+        run: cp -r data dist/data
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

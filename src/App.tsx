@@ -33,11 +33,16 @@ export default function App() {
     else useStore.setState({ stock: null, fallback: null, marketMeta: null })
   }, [route.view, selected, loadStock])
 
-  // Service Worker（PWA 离线缓存）
+  // Service Worker（PWA 离线缓存 + 升级接管时自动刷新，避免用户卡在旧版）
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {})
-    }
+    if (!('serviceWorker' in navigator)) return
+    let reloading = false
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return
+      reloading = true
+      window.location.reload()
+    })
+    navigator.serviceWorker.register('./sw.js').catch(() => {})
   }, [])
 
   const updated = watchlist?.updated
@@ -72,6 +77,15 @@ export default function App() {
           <button className={`mk-tab${route.view === 'screener' ? ' on' : ''}`} onClick={() => (location.hash = '#/screener')}>
             🔍 全市场筛选
           </button>
+        </div>
+      )}
+
+      {!selected && route.view === 'list' && (
+        <div className="market-entry">
+          <span className="me-label">📊 想浏览全市场？</span>
+          <button className="me-btn" onClick={() => (location.hash = '#/market')}>🏆 Top50 低估榜</button>
+          <button className="me-btn me-primary" onClick={() => (location.hash = '#/screener')}>🔍 全市场筛选</button>
+          <span className="me-hint">4928 只 · 自选可加</span>
         </div>
       )}
 
