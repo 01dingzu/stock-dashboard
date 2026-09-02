@@ -57,6 +57,37 @@ async function shot(page, name) {
     if (firstCursor !== 'default') errors.push('未加入条目 cursor 应为 default, 实际 ' + firstCursor);
   }
 
+  // 3.5 加入自选池流程：点"＋ 加入" → 已选待同步徽标 → localStorage 持久化 → 刷新仍在 → 复制清单 → 列表页提示
+  await page.waitForSelector('.mk-add-btn', { timeout: 10000 });
+  await page.locator('.mk-add-btn').first().click();
+  await page.waitForTimeout(800);
+  const pickedTag = await page.$$eval('.mk-picked-tag', (els) => els.length);
+  const pickedName = await page.$eval('.mk-picked-tag', (el) => el.closest('.mk-item').querySelector('.mk-name').textContent.trim()).catch(() => '');
+  console.log('[3.5] 点击加入后 已选待同步=' + pickedTag, '首个:', pickedName);
+  if (pickedTag === 0) errors.push('加入按钮点击后未出现已选待同步徽标');
+  const ls = await page.evaluate(() => JSON.parse(localStorage.getItem('watchlist_pending_v1') || '[]'));
+  console.log('      localStorage 记录:', JSON.stringify(ls));
+  if (ls.length !== 1) errors.push('localStorage 待同步记录应为 1, 实际 ' + ls.length);
+  const syncBanner = await page.evaluate(() => document.body.innerText.includes('已选 1 只待同步'));
+  if (!syncBanner) errors.push('sync-banner 未显示已选数量');
+  // 刷新验证跨会话持久化
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.mk-list .mk-item', { timeout: 15000 });
+  const afterReload = await page.$$eval('.mk-picked-tag', (els) => els.length);
+  console.log('      刷新后仍保留已选:', afterReload);
+  if (afterReload === 0) errors.push('刷新后 localStorage 持久化失效');
+  const copyBtn = await page.$eval('.sync-copy-btn', (el) => el.textContent).catch(() => '');
+  console.log('      复制清单按钮:', copyBtn.trim());
+  if (!copyBtn.includes('复制')) errors.push('复制清单按钮缺失');
+  await shot(page, 'e2e-4-pick.png');
+  // 返回列表页，验证待同步提示条
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.waitForSelector('.stock-row', { timeout: 10000 });
+  const pendingBanner = await page.evaluate(() => document.body.innerText.includes('已选待同步'));
+  console.log('      列表页待同步提示条:', pendingBanner);
+  if (!pendingBanner) errors.push('列表页待同步提示条缺失');
+  await shot(page, 'e2e-5-pending-banner.png');
+
   // 4. 通过 hash 直接进入详情（验证综合说明）
   await page.evaluate(() => { location.hash = '#/stock/sh.601318'; });
   await page.waitForSelector('.chart canvas, .chart', { timeout: 15000 });

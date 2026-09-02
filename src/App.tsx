@@ -15,13 +15,23 @@ function parseRoute(): { view: 'list' | 'market'; code: string | null } {
 export default function App() {
   const { watchlist, stock, loading, error, loadWatchlist, loadStock } = useStore()
   const [route, setRoute] = useState(parseRoute())
+  const [pendingCount, setPendingCount] = useState(0)
   const selected = route.code
 
   useEffect(() => {
     loadWatchlist()
-    const onHash = () => setRoute(parseRoute())
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
+    const refresh = () => {
+      setRoute(parseRoute())
+      try {
+        const arr = JSON.parse(localStorage.getItem('watchlist_pending_v1') || '[]')
+        setPendingCount(Array.isArray(arr) ? arr.length : 0)
+      } catch {
+        setPendingCount(0)
+      }
+    }
+    refresh()
+    window.addEventListener('hashchange', refresh)
+    return () => window.removeEventListener('hashchange', refresh)
   }, [loadWatchlist])
 
   useEffect(() => {
@@ -69,6 +79,11 @@ export default function App() {
           watchlistCodes={watchlistCodes}
           onSelect={(code) => (location.hash = `#/stock/${code}`)}
         />
+      )}
+      {!selected && route.view === 'list' && pendingCount > 0 && (
+        <div className="pending-banner" onClick={() => (location.hash = '#/market')}>
+          📌 有 <b>{pendingCount}</b> 只已选待同步 —— 去「全市场低估」页复制代码清单，发给助理即可生成数据并入池 ›
+        </div>
       )}
       {!selected && route.view === 'list' && watchlist && <StockList watchlist={watchlist} onSelect={(code) => (location.hash = `#/stock/${code}`)} />}
       {selected && stock && <StockDetail data={stock} onBack={() => (location.hash = '#/')} />}
