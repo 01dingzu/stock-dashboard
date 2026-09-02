@@ -191,37 +191,61 @@ def rank_market(rows: list, top_n: int | None = 50) -> list:
     """六因子打分（估值 45% + 盈利 20% + 股息 15% + 负债 10% + 成长 10%）：
     PE/PB 越低分越高、ROE 越高分越高、股息率越高分越高、负债率越低分越高、净利同比越高分越高。
     缺字段的因子给中性 0.5（不因数据缺失惩罚）。
-    top_n=None 时返回全市场完整排名（供 market_all.json 详情兜底使用）。"""
+
+    仅对"可估值"子集（PE>0 且 PB>0 且 ROE 有值）打分排名（亏损股无 PE 分位意义）；
+    其余股票（亏损/停牌数据缺）不丢弃——score=None、rank=None，按市值降序排在末尾，
+    保证全市场页/兜底详情能覆盖每一只。top_n=None 时返回完整列表。"""
     df = pd.DataFrame(rows)
     if df.empty:
         return []
-    df = df[(df["pe"] > 0) & (df["pb"] > 0) & df["roe"].notna()].copy()
-    if df.empty:
-        return []
-    df["pct_pe"] = df["pe"].rank(pct=True)
-    df["pct_pb"] = df["pb"].rank(pct=True)
-    df["pct_roe"] = df["roe"].rank(pct=True)
-    for col in ("div_yield", "debt_ratio", "yoy_ni"):
-        if col not in df.columns:
-            df[col] = None
-    # 分位打分；缺失 → 中性 0.5
-    df["pct_div"] = df["div_yield"].rank(pct=True).where(df["div_yield"].notna(), 0.5)
-    df["pct_debt"] = df["debt_ratio"].rank(pct=True).where(df["debt_ratio"].notna(), 0.5)
-    df["pct_yoy"] = df["yoy_ni"].rank(pct=True).where(df["yoy_ni"].notna(), 0.5)
-    df["score"] = (
-        0.25 * (1 - df["pct_pe"])
-        + 0.20 * (1 - df["pct_pb"])
-        + 0.20 * df["pct_roe"]
-        + 0.15 * df["pct_div"]
-        + 0.10 * (1 - df["pct_debt"])
-        + 0.10 * df["pct_yoy"]
-    )
-    df = df.sort_values("score", ascending=False)
-    df["rank"] = range(1, len(df) + 1)
-    df["industry"] = df["industry"].map(clean_industry)
     cols = ["rank", "code", "name", "industry", "close", "pe", "pb", "roe",
             "gpm", "mktcap", "yoy_ni", "debt_ratio", "div_yield", "report", "score"]
-    recs = df[cols].to_dict("records") if top_n is None else df[cols].head(top_n).to_dict("records")
+    for c in ("gpm", "mktcap", "yoy_ni", "debt_ratio", "div_yield", "report", "close", "industry"):
+        if c not in df.columns:
+            df[c] = None
+
+    valid = (df["pe"] > 0) & (df["pb"] > 0) & df["roe"].notna()
+    recs: list = []
+
+    df_sc = df[valid].copy()
+    if not df_sc.empty:
+        df_sc["pct_pe"] = df_sc["pe"].rank(pct=True)
+        df_sc["pct_pb"] = df_sc["pb"].rank(pct=True)
+        df_sc["pct_roe"] = df_sc["roe"].rank(pct=True)
+        for col in ("div_yield", "debt_ratio", "yoy_ni"):
+            if col not in df_sc.columns:
+                df_sc[col] = None
+        df_sc["pct_div"] = df_sc["div_yield"].rank(pct=True).where(df_sc["div_yield"].notna(), 0.5)
+        df_sc["pct_debt"] = df_sc["debt_ratio"].rank(pct=True).where(df_sc["debt_ratio"].notna(), 0.5)
+        df_sc["pct_yoy"] = df_sc["yoy_ni"].rank(pct=True).where(df_sc["yoy_ni"].notna(), 0.5)
+        df_sc["score"] = (
+            0.25 * (1 - df_sc["pct_pe"])
+            + 0.20 * (1 - df_sc["pct_pb"])
+            + 0.20 * df_sc["pct_roe"]
+            + 0.15 * df_sc["pct_div"]
+            + 0.10 * (1 - df_sc["pct_debt"])
+            + 0.10 * df_sc["pct_yoy"]
+        )
+        df_sc = df_sc.sort_values("score", ascending=False)
+        df_sc["rank"] = range(1, len(df_sc) + 1)
+        df_sc["industry"] = df_sc["industry"].map(clean_industry)
+        sc_part = df_sc[cols].to_dict("records") if top_n is None else df_sc[cols].head(top_n).to_dict("records")
+        recs.extend(sc_part)
+
+    # 有效子集不足 top_n 时（Top50 场景几乎不会）也用无评分股补位；
+    # 全量模式（top_n=None）总把无评分股排在有分之后。
+    if top_n is not None:
+        recs = recs[:top_n]
+
+    # 未评分集合（亏损/关键数据缺失）→ 沉底，score/rank 置空，按市值降序
+    df_rest = df[~valid].copy()
+    if not df_rest.empty:
+        df_rest["score"] = None
+        df_rest["rank"] = None
+        df_rest["industry"] = df_rest["industry"].map(clean_industry)
+        df_rest = df_rest.sort_values("mktcap", ascending=False, na_position="last")
+        recs.extend(df_rest[cols].to_dict("records"))
+
     # 清洗 NaN → None（pandas 缺失值会以 NaN 字面量写入 JSON，前端 JSON.parse 会失败）
     for r in recs:
         for k, v in r.items():

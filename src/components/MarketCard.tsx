@@ -22,7 +22,8 @@ function fmtCap(yi: number | null | undefined): string {
 }
 
 // 六因子评分等级：满分 1.0（0.72+ 优秀 / 0.60+ 中等 / 其余偏弱）
-function scoreClass(score: number): string {
+function scoreClass(score: number | null): string {
+  if (score == null) return 'none'
   if (score >= 0.72) return 'good'
   if (score >= 0.6) return 'mid'
   return 'low'
@@ -51,13 +52,13 @@ export default function MarketCard({ item, meta, onBack }: Props) {
         <div className="mk-hero-block">
           <div className="k">全市场排名</div>
           <div className="v">
-            #{s.rank}
+            {s.rank != null ? `#${s.rank}` : '—'}
             <span className="dim"> / {meta.universe} 只</span>
           </div>
         </div>
         <div className="mk-hero-block">
           <div className="k">六因子评分</div>
-          <div className={`v hero-score ${scoreClass(s.score)}`}>{s.score.toFixed(3)}</div>
+          <div className={`v hero-score ${scoreClass(s.score)}`}>{s.score != null ? s.score.toFixed(3) : <span>亏损 / 数据不足，未参与六因子评分</span>}</div>
         </div>
         <div className="mk-hero-block">
           <div className="k">财报期</div>

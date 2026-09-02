@@ -31,8 +31,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data
-          git diff --cached --quiet || git commit -m "chore: daily data update $(date +'%Y-%m-%d')"
-          git push
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: daily data update $(date +'%Y-%m-%d')"
+            # 远端可能已有新提交（本地手动 push / 并行 run），先同步再推；仍失败则忽略，不阻断部署
+            git fetch origin && git merge --no-edit origin/main || true
+            git push || echo "push skipped (remote conflict)"
+          fi
 
   deploy:
     needs: pipeline

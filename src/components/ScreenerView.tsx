@@ -334,7 +334,7 @@ export default function ScreenerView({ dataCodes, localWatch, onSelect }: Props)
           return (
             <div className="mk-item clickable" key={s.code} onClick={() => onSelect(s.code)}
               title={hasData ? `查看 ${s.name} 详情（深度版）` : `查看 ${s.name} 的全市场评分与解释`}>
-              <div className="mk-rank">{s.rank}</div>
+              <div className="mk-rank">{s.rank ?? '—'}</div>
               <div className="mk-main">
                 <div className="mk-name">
                   {s.name}
@@ -369,7 +369,7 @@ export default function ScreenerView({ dataCodes, localWatch, onSelect }: Props)
                   {s.yoy_ni != null ? <span className={s.yoy_ni >= 0 ? 'up' : 'down'}>{s.yoy_ni > 0 ? '+' : ''}{s.yoy_ni}%</span> : '—'}
                 </div>
               </div>
-              <div className="mk-score">{s.score.toFixed(3)}</div>
+              <div className="mk-score">{s.score != null ? s.score.toFixed(3) : <span className="mk-noscore">亏损</span>}</div>
               <button className={`mk-add-btn${isAdded ? ' added' : ''}`}
                 onClick={(e) => { e.stopPropagation(); toggleLocal({ code: s.code, name: s.name, industry: s.industry }) }}>
                 {isAdded ? '已加入 ✓' : '＋ 加入'}
