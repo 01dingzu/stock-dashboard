@@ -81,7 +81,7 @@ export default function MarketRankView({ dataCodes, localWatch, onSelect }: Prop
               <div className="mk-main">
                 <div className="mk-name">
                   {s.name}
-                  <span className="mk-code">{s.code.replace(/\.\d+$/, '').replace(/(sh|sz)\./, '')}</span>
+                  <span className="mk-code">{s.code.replace(/^(sh|sz)\./, '')}</span>
                   {isAdded ? (
                     <span className="mk-in-tag">已加入</span>
                   ) : (
