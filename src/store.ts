@@ -25,6 +25,33 @@ function writeLocal(items: LocalItem[]) {
   localStorage.setItem(LOCAL_KEY, JSON.stringify(items))
 }
 
+// 旧"已选待同步"(v6, watchlist_pending_v1) 残留兜底：把 LOCAL_KEY 里没有的项幂等并入，防止
+// "旧页面(SW 缓存)写入 pending key → 新页面刷新只剩默认池" 的 split-brain。并入后删除旧 key。
+function absorbLegacy(items: LocalItem[]): LocalItem[] {
+  const raw = localStorage.getItem(LEGACY_PENDING_KEY)
+  if (raw === null) return items
+  let legacy: LocalItem[] = []
+  try {
+    const p = JSON.parse(raw)
+    if (Array.isArray(p)) legacy = p
+  } catch {
+    legacy = []
+  }
+  const seen = new Set(items.map((i) => i.code))
+  let changed = false
+  for (const l of legacy) {
+    if (l && typeof l.code === 'string' && l.code && !seen.has(l.code)) {
+      items.push({ code: l.code, name: l.name ?? l.code, industry: l.industry ?? '' })
+      seen.add(l.code)
+      changed = true
+    }
+  }
+  // 无论是否并入，旧 key 使命已完成（空 / 全部重复 / 已并入）→ 删除，杜绝 split-brain 再发生
+  if (changed) writeLocal(items)
+  localStorage.removeItem(LEGACY_PENDING_KEY)
+  return items
+}
+
 interface MarketMeta {
   updated: string
   universe: number
@@ -75,9 +102,12 @@ export const useStore = create<State>((set) => ({
           }
         }
         writeLocal(merged)
+        localStorage.removeItem(LEGACY_PENDING_KEY)
         set({ watchlist: w, localWatch: merged, loading: false })
       } else {
-        set({ watchlist: w, localWatch: readLocal(), loading: false })
+        // 已初始化：读取本地自选，并吸收旧页面(pending key)可能残留的加入项（幂等）
+        const items = absorbLegacy(readLocal())
+        set({ watchlist: w, localWatch: items, loading: false })
       }
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e), loading: false })
