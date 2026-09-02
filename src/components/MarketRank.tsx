@@ -1,29 +1,27 @@
 import { useEffect, useState } from 'react'
 import type { MarketRank } from '../types'
 import { fetchMarketRank } from '../api'
+import { useStore } from '../store'
+import type { LocalItem } from '../store'
 
 interface Props {
-  watchlistCodes?: Set<string>
+  dataCodes?: Set<string> // 后端 watchlist.json 的 code 集合 = "详情数据可用"
+  localWatch?: LocalItem[] // 用户自选池（localStorage 真相来源）
   onSelect: (code: string) => void
 }
 
-// localStorage 待同步自选池（跨会话持久化；watchlist.json 生成后自动转为"已加入"）
-const PENDING_KEY = 'watchlist_pending_v1'
-interface PendingItem { code: string; name: string; industry: string }
-
-function loadPending(): PendingItem[] {
-  try {
-    return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]')
-  } catch {
-    return []
-  }
+// 市值格式化（单位：亿元）：12000 → "1.2万亿"，3100 → "3100亿"
+function fmtCap(yi: number): string {
+  if (yi >= 10000) return (yi / 10000).toFixed(1).replace(/\.0$/, '') + '万亿'
+  if (yi >= 1000) return (yi / 1000).toFixed(1).replace(/\.0$/, '') + '千亿'
+  return yi.toFixed(0) + '亿'
 }
 
-export default function MarketRankView({ watchlistCodes, onSelect }: Props) {
+export default function MarketRankView({ dataCodes, localWatch, onSelect }: Props) {
   const [data, setData] = useState<MarketRank | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState<PendingItem[]>(loadPending)
   const [copied, setCopied] = useState(false)
+  const toggleLocal = useStore((s) => s.toggleLocal)
 
   useEffect(() => {
     fetchMarketRank()
@@ -31,13 +29,8 @@ export default function MarketRankView({ watchlistCodes, onSelect }: Props) {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
 
-  const toggle = (s: { code: string; name: string; industry: string }) => {
-    const next = pending.some((p) => p.code === s.code)
-      ? pending.filter((p) => p.code !== s.code)
-      : [...pending, { code: s.code, name: s.name, industry: s.industry }]
-    localStorage.setItem(PENDING_KEY, JSON.stringify(next))
-    setPending(next)
-  }
+  // 待同步 = 已加入自选池但后端无详情数据
+  const pending = (localWatch ?? []).filter((i) => !(dataCodes?.has(i.code) ?? false))
 
   const copyCodes = async () => {
     const codes = pending.map((p) => p.code).join(',')
@@ -46,7 +39,6 @@ export default function MarketRankView({ watchlistCodes, onSelect }: Props) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // clipboard 不可用时回退：选中文本提示
       setCopied(false)
     }
   }
@@ -57,7 +49,7 @@ export default function MarketRankView({ watchlistCodes, onSelect }: Props) {
   return (
     <div className="market">
       <div className="note-banner">
-        全市场因子扫描：PE/PB 越低分越高、ROE 越高分越高（权重 0.4/0.3/0.3），覆盖 {data.universe} 只（剔除 ST/退市/次新）。
+        全市场六因子扫描：PE 25% + PB 20%（越低越好）· ROE 20%（越高越好）· 股息率 15% · 负债率 10%（越低越好）· 净利同比 10%（越高越好），覆盖 {data.universe} 只（剔除 ST/退市/次新）。
         仅作观察参考，不构成投资建议。· 数据 {data.updated}
       </div>
 
@@ -75,24 +67,23 @@ export default function MarketRankView({ watchlistCodes, onSelect }: Props) {
 
       <div className="mk-list">
         {data.stocks.map((s) => {
-          const inWatchlist = watchlistCodes?.has(s.code) ?? false
-          const isPicked = pending.some((p) => p.code === s.code)
+          const hasData = dataCodes?.has(s.code) ?? false
+          const isAdded = localWatch?.some((p) => p.code === s.code) ?? false
+          const clickable = isAdded && hasData
           return (
             <div
-              className={`mk-item${inWatchlist ? '' : ' mk-item-out'}`}
+              className={`mk-item${isAdded ? (hasData ? ' added clickable' : ' added') : ' not-added'}`}
               key={s.code}
-              onClick={inWatchlist ? () => onSelect(s.code) : undefined}
-              title={inWatchlist ? `查看 ${s.name} 详情` : isPicked ? `${s.name} 已选待同步` : `${s.name} 未加入自选池，点 ＋ 加入`}
+              onClick={clickable ? () => onSelect(s.code) : undefined}
+              title={clickable ? `查看 ${s.name} 详情` : isAdded ? `${s.name} 已加入自选池，详情数据待同步` : `${s.name} 未加入自选池，点 ＋ 加入`}
             >
               <div className="mk-rank">{s.rank}</div>
               <div className="mk-main">
                 <div className="mk-name">
                   {s.name}
                   <span className="mk-code">{s.code.replace(/\.\d+$/, '').replace(/(sh|sz)\./, '')}</span>
-                  {inWatchlist ? (
-                    <span className="mk-in-tag">自选池</span>
-                  ) : isPicked ? (
-                    <span className="mk-picked-tag">已选待同步</span>
+                  {isAdded ? (
+                    <span className="mk-in-tag">已加入</span>
                   ) : (
                     <span className="mk-out-tag">未加入</span>
                   )}
@@ -104,19 +95,25 @@ export default function MarketRankView({ watchlistCodes, onSelect }: Props) {
                 <div className="mk-meta">
                   PE {s.pe ?? '—'} · PB {s.pb ?? '—'} · ROE {s.roe ?? '—'}%
                 </div>
+                <div className="mk-meta2">
+                  {s.div_yield != null ? <>息 {s.div_yield}%</> : <span className="dim">息 —</span>}
+                  {' · '}
+                  {s.mktcap != null ? <>市值 {fmtCap(s.mktcap)}</> : <span className="dim">市值 —</span>}
+                  {' · 负债 '}{s.debt_ratio ?? '—'}%
+                  {' · 净利 '}
+                  {s.yoy_ni != null ? <span className={s.yoy_ni >= 0 ? 'up' : 'down'}>{s.yoy_ni > 0 ? '+' : ''}{s.yoy_ni}%</span> : '—'}
+                </div>
               </div>
               <div className="mk-score">{s.score.toFixed(3)}</div>
-              {!inWatchlist && (
-                <button
-                  className={`mk-add-btn${isPicked ? ' picked' : ''}`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    toggle({ code: s.code, name: s.name, industry: s.industry })
-                  }}
-                >
-                  {isPicked ? '已选 ✓' : '＋ 加入'}
-                </button>
-              )}
+              <button
+                className={`mk-add-btn${isAdded ? ' added' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleLocal({ code: s.code, name: s.name, industry: s.industry })
+                }}
+              >
+                {isAdded ? '已加入 ✓' : '＋ 加入'}
+              </button>
             </div>
           )
         })}

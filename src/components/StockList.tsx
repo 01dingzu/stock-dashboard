@@ -1,10 +1,17 @@
 import { useMemo, useState } from 'react'
-import type { Watchlist, WatchItem } from '../types'
+import type { WatchItem } from '../types'
 import { fmtNum, fmtPct, upDownClass } from './FundCard'
+import type { LocalItem } from '../store'
+
+export interface ListRow {
+  local: LocalItem
+  data: WatchItem | null // null = 已加入自选池但后端详情数据未生成（待同步）
+}
 
 interface Props {
-  watchlist: Watchlist
+  items: ListRow[]
   onSelect: (code: string) => void
+  onRemove: (code: string) => void
 }
 
 // 行情新鲜度：last_date 距今天超过 N 天视为滞后（周末/节假日自然滞后，容忍 5 天）
@@ -49,18 +56,21 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'div', label: '股息率↓' },
 ]
 
-export default function StockList({ watchlist, onSelect }: Props) {
+export default function StockList({ items, onSelect, onRemove }: Props) {
   const [sort, setSort] = useState<SortKey>('default')
-  const scores = useMemo(() => estimateScore(watchlist.stocks), [watchlist.stocks])
+  const withData = useMemo(() => items.filter((r) => r.data), [items])
+  const scores = useMemo(() => estimateScore(withData.map((r) => r.data as WatchItem)), [withData])
 
+  // 排序仅作用于"有数据"的行；"待同步"行固定排在后面
   const rows = useMemo(() => {
-    const arr = [...watchlist.stocks]
-    if (sort === 'score') arr.sort((a, b) => (scores.get(a.code) ?? 999) - (scores.get(b.code) ?? 999))
-    if (sort === 'pct') arr.sort((a, b) => (b.pct ?? -Infinity) - (a.pct ?? -Infinity))
-    if (sort === 'pe') arr.sort((a, b) => (a.pe ?? Infinity) - (b.pe ?? Infinity))
-    if (sort === 'div') arr.sort((a, b) => (b.div_yield ?? -Infinity) - (a.div_yield ?? -Infinity))
-    return arr
-  }, [watchlist.stocks, sort, scores])
+    const arr = [...withData]
+    if (sort === 'score') arr.sort((a, b) => (scores.get(a.data!.code) ?? 999) - (scores.get(b.data!.code) ?? 999))
+    if (sort === 'pct') arr.sort((a, b) => (b.data!.pct ?? -Infinity) - (a.data!.pct ?? -Infinity))
+    if (sort === 'pe') arr.sort((a, b) => (a.data!.pe ?? Infinity) - (b.data!.pe ?? Infinity))
+    if (sort === 'div') arr.sort((a, b) => (b.data!.div_yield ?? -Infinity) - (a.data!.div_yield ?? -Infinity))
+    const pendings = items.filter((r) => !r.data)
+    return [...arr, ...pendings]
+  }, [withData, items, sort, scores])
 
   return (
     <div className="list">
@@ -74,39 +84,62 @@ export default function StockList({ watchlist, onSelect }: Props) {
             {s.label}
           </button>
         ))}
-        <span className="hint">估值分=PE/PB百分位·实验性</span>
+        <span className="hint">估值分=PE/PB百分位·实验性 · 点 × 移除自选</span>
       </div>
-      {rows.map((s) => {
-        const stale = staleDays(s.last_date)
-        const sc = scores.get(s.code)
+      {rows.map(({ local, data }) => {
+        if (!data) {
+          return (
+            <div className="stock-row pending" key={local.code} title={`${local.name} 详情数据待同步：在市场页复制代码清单发给助理`}>
+              <div>
+                <div className="name">
+                  {local.name}
+                  <span className="sync-pending-tag">待同步</span>
+                </div>
+                <div className="code">
+                  {local.code.replace(/(sh|sz)\./, '')}
+                  <span className="industry">{local.industry}</span>
+                </div>
+              </div>
+              <div className="spacer" />
+              <button className="row-remove" onClick={(e) => { e.stopPropagation(); onRemove(local.code) }} title="从自选池移除">×</button>
+            </div>
+          )
+        }
+        const stale = staleDays(data.last_date)
+        const sc = scores.get(data.code)
         return (
-          <div className="stock-row" key={s.code} onClick={() => onSelect(s.code)}>
+          <div className="stock-row" key={data.code} onClick={() => onSelect(data.code)}>
             <div>
               <div className="name">
-                {s.name}
-                {s.div_yield != null && s.div_yield > 0 && (
-                  <span className="div-yield">息 {fmtPct(s.div_yield)}</span>
+                {data.name}
+                {data.div_yield != null && data.div_yield > 0 && (
+                  <span className="div-yield">息 {fmtPct(data.div_yield)}</span>
                 )}
                 {sc != null && <span className={`score-tag ${sc >= 60 ? 'good' : sc >= 40 ? 'mid' : 'low'}`}>估值{sc}</span>}
-                {stale > 5 && <span className="stale-tag">行情滞后{s.last_date ? `（${s.last_date.slice(5)}）` : ''}</span>}
+                {stale > 5 && <span className="stale-tag">行情滞后{data.last_date ? `（${data.last_date.slice(5)}）` : ''}</span>}
               </div>
               <div className="code">
-                {s.code.replace(/(sh|sz)\./, '')}
-                <span className="industry">{s.industry}</span>
+                {data.code.replace(/(sh|sz)\./, '')}
+                <span className="industry">{data.industry}</span>
                 <span className="industry">
-                  {s.report_period ? `财报 ${s.report_period}` : ''}
+                  {data.report_period ? `财报 ${data.report_period}` : ''}
                 </span>
               </div>
             </div>
             <div className="spacer" />
             <div className="price">
-              <div className={`p ${upDownClass(s.pct)}`}>{fmtNum(s.price)}</div>
-              <div className={`chg ${upDownClass(s.pct)}`}>{fmtPct(s.pct)}</div>
+              <div className={`p ${upDownClass(data.pct)}`}>{fmtNum(data.price)}</div>
+              <div className={`chg ${upDownClass(data.pct)}`}>{fmtPct(data.pct)}</div>
             </div>
+            <button className="row-remove" onClick={(e) => { e.stopPropagation(); onRemove(data.code) }} title="从自选池移除">×</button>
           </div>
         )
       })}
-      {watchlist.stocks.length === 0 && <div className="loading">暂无数据（管道可能未运行）</div>}
+      {items.length === 0 && (
+        <div className="loading">
+          自选池为空。去「全市场低估」页点 ＋ 加入，或运行 pipeline/main.py 生成默认池。
+        </div>
+      )}
     </div>
   )
 }

@@ -31,6 +31,11 @@ export interface MarketItem {
   pe: number | null
   pb: number | null
   roe: number | null
+  gpm?: number | null        // 毛利率 %
+  mktcap?: number | null     // 市值（亿元）
+  yoy_ni?: number | null     // 净利同比 %
+  debt_ratio?: number | null // 资产负债率 %
+  div_yield?: number | null  // 股息率 %
   report: string
   score: number
 }

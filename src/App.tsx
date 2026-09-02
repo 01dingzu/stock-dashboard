@@ -13,22 +13,13 @@ function parseRoute(): { view: 'list' | 'market'; code: string | null } {
 }
 
 export default function App() {
-  const { watchlist, stock, loading, error, loadWatchlist, loadStock } = useStore()
+  const { watchlist, stock, loading, error, localWatch, loadWatchlist, loadStock, removeLocal } = useStore()
   const [route, setRoute] = useState(parseRoute())
-  const [pendingCount, setPendingCount] = useState(0)
   const selected = route.code
 
   useEffect(() => {
     loadWatchlist()
-    const refresh = () => {
-      setRoute(parseRoute())
-      try {
-        const arr = JSON.parse(localStorage.getItem('watchlist_pending_v1') || '[]')
-        setPendingCount(Array.isArray(arr) ? arr.length : 0)
-      } catch {
-        setPendingCount(0)
-      }
-    }
+    const refresh = () => setRoute(parseRoute())
     refresh()
     window.addEventListener('hashchange', refresh)
     return () => window.removeEventListener('hashchange', refresh)
@@ -47,7 +38,12 @@ export default function App() {
   }, [])
 
   const updated = watchlist?.updated
-  const watchlistCodes = new Set(watchlist?.stocks.map((s) => s.code) ?? [])
+  // 后端 watchlist.json = "详情数据可用" 标记集合
+  const dataCodes = new Set(watchlist?.stocks.map((s) => s.code) ?? [])
+  // 自选池真相 = localWatch（localStorage），合并后端行情数据
+  const watchMap = new Map((watchlist?.stocks ?? []).map((s) => [s.code, s]))
+  const listItems = localWatch.map((l) => ({ local: l, data: watchMap.get(l.code) ?? null }))
+  const pendingItems = localWatch.filter((l) => !dataCodes.has(l.code))
 
   return (
     <div className="app">
@@ -69,23 +65,32 @@ export default function App() {
         <div className="error">
           ⚠ {error}
           <br />
-          {error.includes('加载失败') ? '该股可能不在自选池中。先在自选池页面加入，或等待 pipeline/main.py 生成数据。' : '数据可能尚未生成，先运行 pipeline/main.py 或等待 GitHub Actions。'}
+          {error.includes('加载失败') ? '该股详情数据尚未生成。若已在自选池，请在「全市场低估」页复制代码清单发给助理生成数据。' : '数据可能尚未生成，先运行 pipeline/main.py 或等待 GitHub Actions。'}
         </div>
       )}
       {loading && !stock && route.view === 'list' && <div className="loading">加载中…</div>}
 
       {!selected && route.view === 'market' && (
         <MarketRankView
-          watchlistCodes={watchlistCodes}
+          dataCodes={dataCodes}
+          localWatch={localWatch}
           onSelect={(code) => (location.hash = `#/stock/${code}`)}
         />
       )}
-      {!selected && route.view === 'list' && pendingCount > 0 && (
+      {!selected && route.view === 'list' && pendingItems.length > 0 && (
         <div className="pending-banner" onClick={() => (location.hash = '#/market')}>
-          📌 有 <b>{pendingCount}</b> 只已选待同步 —— 去「全市场低估」页复制代码清单，发给助理即可生成数据并入池 ›
+          📌 <b>{pendingItems.length}</b> 只待同步：{pendingItems.map((i) => i.name).join('、')}
+          <br />
+          去「全市场低估」页复制代码清单发给助理，即可生成详情数据并入池 ›
         </div>
       )}
-      {!selected && route.view === 'list' && watchlist && <StockList watchlist={watchlist} onSelect={(code) => (location.hash = `#/stock/${code}`)} />}
+      {!selected && route.view === 'list' && (
+        <StockList
+          items={listItems}
+          onSelect={(code) => (location.hash = `#/stock/${code}`)}
+          onRemove={removeLocal}
+        />
+      )}
       {selected && stock && <StockDetail data={stock} onBack={() => (location.hash = '#/')} />}
     </div>
   )

@@ -1,19 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-全市场因子扫描 MVP（P1）
+全市场因子扫描 v2（P1 增强）
 数据源：BaoStock
 流程：query_stock_basic 拿全市场名单(type=1 股票) → query_stock_industry 补行业 →
-      逐只拉最新报告期利润数据(ROE/净利/股本→BPS 反推) + 最近行情(收盘价) →
-      计算 PE/PB/ROE → 套用回测有效因子(PE/PB 低分位高分、ROE 高分位高分)打分 →
+      逐只拉利润(ROE/净利/股本/毛利率)+成长(净利同比)+资产负债率+股息率(TTM) + 最近行情 →
+      计算 PE/PB/ROE/市值/股息率/负债率/净利同比 → 六因子打分 →
       输出低估清单 Top N → data/market_rank.json
 
-特性：断点续传（data/market_cache/{code}.json 已存在则跳过）；--limit 供小样本测试。
+特性：断点续传（data/market_cache/{code}.json 已存在且 schema=2 则跳过；旧版缓存自动重拉）；
+      --limit 供小样本测试；网络错误自动重登重试，单只失败跳过不中断。
 运行：python pipeline/market_scan.py [--limit N] [--force]
 """
 
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import re
 import sys
@@ -113,8 +115,10 @@ def fetch_industry_map() -> dict:
     return m
 
 
-def fetch_one(code: str) -> dict | None:
-    """单只扫描：当期利润(ROE/净利/股本/BPS 反推) + 最近收盘价 → PE/PB/ROE。"""
+def _fetch_one_raw(code: str) -> dict | None:
+    """单只扫描 v2（schema=2）：
+    当期利润(ROE/净利/股本/BPS 反推/毛利率) + 最近收盘价 → PE/PB/ROE/市值；
+    另拉净利同比(growth)、资产负债率(balance)、股息率(dividend_ttm)。"""
     y, q = bf._latest_report_period()
     profit = bf._fetch_report(code, "query_profit_data", y, q)
     if not profit:
@@ -123,6 +127,7 @@ def fetch_one(code: str) -> dict | None:
     eps = profit.get("epsTTM")
     np_ = profit.get("netProfit")
     ts = profit.get("totalShare")
+    gpm = profit.get("gpMargin")        # 毛利率 0~1 小数
 
     daily = _fetch_daily_retry(code)
     if daily.empty:
@@ -135,19 +140,57 @@ def fetch_one(code: str) -> dict | None:
 
     pe = close / eps if eps and eps > 0 else None
     pb = close / bps if bps and bps > 0 else None
+    mktcap = round(close * ts / 1e8, 2) if ts and ts > 0 else None  # 亿元
+
+    yoy_ni = debt_ratio = div_yield = None
+    growth = bf._fetch_report(code, "query_growth_data", y, q)
+    if growth and growth.get("YOYNI") is not None:
+        yoy_ni = round(growth["YOYNI"] * 100, 2)          # 净利同比 %
+    balance = bf._fetch_report(code, "query_balance_data", y, q)
+    if balance and balance.get("liabilityToAsset") is not None:
+        debt_ratio = round(balance["liabilityToAsset"] * 100, 2)  # 资产负债率 %
+    dc = bf.fetch_dividend_ttm(code)
+    if dc and dc > 0 and close > 0:
+        div_yield = round(dc / close * 100, 2)            # 股息率 %
+
     return {
         "code": code, "close": round(close, 2),
         "pe": round(pe, 2) if pe else None,
         "pb": round(pb, 2) if pb else None,
         "roe": round(roe * 100, 2) if roe is not None else None,
+        "gpm": round(gpm * 100, 2) if gpm is not None else None,
+        "mktcap": mktcap,
+        "yoy_ni": yoy_ni,
+        "debt_ratio": debt_ratio,
+        "div_yield": div_yield,
         "report": f"{y}Q{q}",
+        "schema": 2,
     }
+
+
+def fetch_one(code: str) -> dict | None:
+    """fetch_one 外壳：网络类错误（10002007/WinError 10054）强制重登 + 重试，避免单只抖动中断。"""
+    last = None
+    for attempt in range(_RETRY):
+        try:
+            return _fetch_one_raw(code)
+        except RuntimeError as e:
+            msg = str(e)
+            if not any(k in msg for k in _NET_ERR):
+                raise
+            last = e
+            if attempt < _RETRY - 1:
+                bf._refresh_session_if_needed(force=True)
+                time.sleep(3 * (attempt + 1))
+    raise last
 
 
 # ---------------- 打分 ----------------
 
 def rank_market(rows: list, top_n: int = 50) -> list:
-    """套用回测有效因子打分：PE/PB 越低越好(分位反向)，ROE 越高越好(分位正向)。"""
+    """六因子打分（估值 45% + 盈利 20% + 股息 15% + 负债 10% + 成长 10%）：
+    PE/PB 越低分越高、ROE 越高分越高、股息率越高分越高、负债率越低分越高、净利同比越高分越高。
+    缺字段的因子给中性 0.5（不因数据缺失惩罚）。"""
     df = pd.DataFrame(rows)
     if df.empty:
         return []
@@ -157,12 +200,33 @@ def rank_market(rows: list, top_n: int = 50) -> list:
     df["pct_pe"] = df["pe"].rank(pct=True)
     df["pct_pb"] = df["pb"].rank(pct=True)
     df["pct_roe"] = df["roe"].rank(pct=True)
-    df["score"] = 0.4 * (1 - df["pct_pe"]) + 0.3 * (1 - df["pct_pb"]) + 0.3 * df["pct_roe"]
+    for col in ("div_yield", "debt_ratio", "yoy_ni"):
+        if col not in df.columns:
+            df[col] = None
+    # 分位打分；缺失 → 中性 0.5
+    df["pct_div"] = df["div_yield"].rank(pct=True).where(df["div_yield"].notna(), 0.5)
+    df["pct_debt"] = df["debt_ratio"].rank(pct=True).where(df["debt_ratio"].notna(), 0.5)
+    df["pct_yoy"] = df["yoy_ni"].rank(pct=True).where(df["yoy_ni"].notna(), 0.5)
+    df["score"] = (
+        0.25 * (1 - df["pct_pe"])
+        + 0.20 * (1 - df["pct_pb"])
+        + 0.20 * df["pct_roe"]
+        + 0.15 * df["pct_div"]
+        + 0.10 * (1 - df["pct_debt"])
+        + 0.10 * df["pct_yoy"]
+    )
     df = df.sort_values("score", ascending=False)
     df["rank"] = range(1, len(df) + 1)
     df["industry"] = df["industry"].map(clean_industry)
-    cols = ["rank", "code", "name", "industry", "close", "pe", "pb", "roe", "report", "score"]
-    return df[cols].head(top_n).to_dict("records")
+    cols = ["rank", "code", "name", "industry", "close", "pe", "pb", "roe",
+            "gpm", "mktcap", "yoy_ni", "debt_ratio", "div_yield", "report", "score"]
+    recs = df[cols].head(top_n).to_dict("records")
+    # 清洗 NaN → None（pandas 缺失值会以 NaN 字面量写入 JSON，前端 JSON.parse 会失败）
+    for r in recs:
+        for k, v in r.items():
+            if isinstance(v, float) and math.isnan(v):
+                r[k] = None
+    return recs
 
 
 # ---------------- 主流程 ----------------
@@ -191,9 +255,11 @@ def main() -> None:
             cache_f = os.path.join(CACHE_DIR, f"{code.replace('.', '')}.json")
             if os.path.exists(cache_f) and not args.force:
                 with open(cache_f, encoding="utf-8") as f:
-                    rows.append(json.load(f))
-                skipped += 1
-                continue
+                    cached = json.load(f)
+                if cached.get("schema") == 2:  # schema 不匹配 → 旧版缓存，重新拉取
+                    rows.append(cached)
+                    skipped += 1
+                    continue
             try:
                 rec = fetch_one(code)
             except Exception as e:  # noqa: BLE001 —— 单只失败跳过，绝不中断全扫描
@@ -220,8 +286,8 @@ def main() -> None:
         top = rank_market(rows, top_n=50)
         payload = {
             "updated": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "source": "BaoStock 全市场因子扫描 MVP",
-            "note": "PE/PB 越低分越高、ROE 越高分越高（权重 0.4/0.3/0.3）；仅作观察，不构成投资建议",
+            "source": "BaoStock 全市场因子扫描 v2",
+            "note": "六因子评分：PE 25% + PB 20%（越低越好）· ROE 20%（越高越好）· 股息率 15%（越高越好）· 负债率 10%（越低越好）· 净利同比 10%（越高越好）；仅作观察，不构成投资建议",
             "count": len(top),
             "universe": len(rows),
             "stocks": top,
@@ -231,7 +297,11 @@ def main() -> None:
             json.dump(payload, f, ensure_ascii=False, indent=1)
         print(f"低估清单 Top{len(top)} → {out_f}")
         for r in top[:8]:
-            print(f"  #{r['rank']} {r['name']}({r['industry']}) PE={r['pe']} PB={r['pb']} ROE={r['roe']}% score={r['score']:.3f}")
+            print(
+                f"  #{r['rank']} {r['name']}({r['industry']}) PE={r['pe']} PB={r['pb']} ROE={r['roe']}% "
+                f"息={r['div_yield']}% 负债={r['debt_ratio']}% 净利={r['yoy_ni']}% 市值={r['mktcap']}亿 "
+                f"score={r['score']:.3f}"
+            )
     finally:
         bf.logout()
 
