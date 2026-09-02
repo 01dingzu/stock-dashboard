@@ -85,7 +85,8 @@ async function shot(page, name) {
     await page.waitForTimeout(800);
     const addedAfter = await page.$$eval('.mk-item.added', (els) => els.length);
     console.log('    再点取消后 added=' + addedAfter);
-    if (addedAfter === 0) errors.push('应保留 watchlist 默认池成员（招商银行等）未变，不应全清空');
+    // 注：新 v2 六因子 Top50 多为小盘低估股，默认池成员未必在其中（交集可能为空）；
+    // 只需验证"取消生效（数量减少）"即可
     if (addedAfter >= addedCount) errors.push('取消加入未生效（数量未减少）');
   } else {
     console.log('[4] 无未加入条目可测（全部已加入）');
