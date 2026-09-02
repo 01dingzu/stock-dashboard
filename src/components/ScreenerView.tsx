@@ -169,11 +169,11 @@ export default function ScreenerView({ dataCodes, localWatch, onSelect }: Props)
     arr.sort((x, y) => {
       const a = numOf(x, sortBy as NumKey)
       const b = numOf(y, sortBy as NumKey)
-      let d: number
-      if (a == null && b == null) d = 0
-      else if (a == null) d = 1
-      else if (b == null) d = -1
-      else d = a - b
+      // 无数据（null）永远沉底，与升降序无关
+      if (a == null && b == null) return (x.score ?? 0) - (y.score ?? 0)
+      if (a == null) return 1
+      if (b == null) return -1
+      const d = a - b
       if (d !== 0) return asc ? d : -d
       return (x.score ?? 0) - (y.score ?? 0) // 同值回退按评分
     })
