@@ -6,6 +6,8 @@ export interface WatchItem {
   industry: string
   price: number | null
   pct: number | null
+  week_pct?: number | null // 近5交易日（≈1周）涨跌幅 %
+  month_pct?: number | null // 近20交易日（≈1月）涨跌幅 %
   pe: number | null
   pb: number | null
   roe: number | null
@@ -119,6 +121,8 @@ export interface StockData {
     last_date?: string
     price?: number | null
     pct?: number | null
+    week_pct?: number | null // 近5交易日（≈1周）涨跌幅 %
+    month_pct?: number | null // 近20交易日（≈1月）涨跌幅 %
   }
   kline: KBar[]
   macd: MacdPoint[]

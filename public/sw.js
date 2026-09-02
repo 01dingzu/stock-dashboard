@@ -1,4 +1,4 @@
-const CACHE = 'stock-dash-v9';
+const CACHE = 'stock-dash-v10';
 const CORE = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

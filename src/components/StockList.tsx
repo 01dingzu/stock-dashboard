@@ -47,11 +47,13 @@ function estimateScore(stocks: WatchItem[]): Map<string, number> {
   return score
 }
 
-type SortKey = 'default' | 'score' | 'pct' | 'pe' | 'div'
+type SortKey = 'default' | 'score' | 'pct' | 'week' | 'month' | 'pe' | 'div'
 const SORTS: { key: SortKey; label: string }[] = [
   { key: 'default', label: '默认' },
   { key: 'score', label: '估值分↓' },
   { key: 'pct', label: '涨幅↓' },
+  { key: 'week', label: '周涨↓' },
+  { key: 'month', label: '月涨↓' },
   { key: 'pe', label: 'PE↓' },
   { key: 'div', label: '股息率↓' },
 ]
@@ -61,11 +63,29 @@ export default function StockList({ items, onSelect, onRemove }: Props) {
   const withData = useMemo(() => items.filter((r) => r.data), [items])
   const scores = useMemo(() => estimateScore(withData.map((r) => r.data as WatchItem)), [withData])
 
+  // 周/月涨跌汇总：涨跌家数 + 平均涨跌幅（仅统计有周/月数据的行）
+  const stats = useMemo(() => {
+    const arr = withData.map((r) => r.data as WatchItem)
+    const group = (key: 'week_pct' | 'month_pct') => {
+      const vals = arr.map((s) => s[key]).filter((v): v is number => v != null && Number.isFinite(v))
+      if (vals.length === 0) return null
+      return {
+        n: vals.length,
+        up: vals.filter((v) => v > 0).length,
+        down: vals.filter((v) => v < 0).length,
+        avg: vals.reduce((a, b) => a + b, 0) / vals.length,
+      }
+    }
+    return { week: group('week_pct'), month: group('month_pct') }
+  }, [withData])
+
   // 排序仅作用于"有数据"的行；"待同步"行固定排在后面
   const rows = useMemo(() => {
     const arr = [...withData]
     if (sort === 'score') arr.sort((a, b) => (scores.get(a.data!.code) ?? 999) - (scores.get(b.data!.code) ?? 999))
     if (sort === 'pct') arr.sort((a, b) => (b.data!.pct ?? -Infinity) - (a.data!.pct ?? -Infinity))
+    if (sort === 'week') arr.sort((a, b) => (b.data!.week_pct ?? -Infinity) - (a.data!.week_pct ?? -Infinity))
+    if (sort === 'month') arr.sort((a, b) => (b.data!.month_pct ?? -Infinity) - (a.data!.month_pct ?? -Infinity))
     if (sort === 'pe') arr.sort((a, b) => (a.data!.pe ?? Infinity) - (b.data!.pe ?? Infinity))
     if (sort === 'div') arr.sort((a, b) => (b.data!.div_yield ?? -Infinity) - (a.data!.div_yield ?? -Infinity))
     const pendings = items.filter((r) => !r.data)
@@ -74,6 +94,26 @@ export default function StockList({ items, onSelect, onRemove }: Props) {
 
   return (
     <div className="list">
+      {(stats.week || stats.month) && (
+        <div className="perf-strip">
+          {stats.week && (
+            <span className="ps-group" title="近5个交易日（≈1周）">
+              周&nbsp;
+              <b className="ps-up">↑{stats.week.up}</b>
+              <b className="ps-down">↓{stats.week.down}</b>
+              <span className={`ps-avg ${upDownClass(stats.week.avg)}`}>均值 {fmtPct(stats.week.avg)}</span>
+            </span>
+          )}
+          {stats.month && (
+            <span className="ps-group" title="近20个交易日（≈1月）">
+              月&nbsp;
+              <b className="ps-up">↑{stats.month.up}</b>
+              <b className="ps-down">↓{stats.month.down}</b>
+              <span className={`ps-avg ${upDownClass(stats.month.avg)}`}>均值 {fmtPct(stats.month.avg)}</span>
+            </span>
+          )}
+        </div>
+      )}
       <div className="sort-chips">
         {SORTS.map((s) => (
           <button
@@ -84,7 +124,7 @@ export default function StockList({ items, onSelect, onRemove }: Props) {
             {s.label}
           </button>
         ))}
-        <span className="hint">估值分=PE/PB百分位·实验性 · 点 × 移除自选</span>
+        <span className="hint">周≈近5交易日 · 月≈近20交易日 · 估值分=PE/PB百分位 · 点 × 移除自选</span>
       </div>
       {rows.map(({ local, data }) => {
         if (!data) {
@@ -130,6 +170,12 @@ export default function StockList({ items, onSelect, onRemove }: Props) {
             <div className="price">
               <div className={`p ${upDownClass(data.pct)}`}>{fmtNum(data.price)}</div>
               <div className={`chg ${upDownClass(data.pct)}`}>{fmtPct(data.pct)}</div>
+              {(data.week_pct != null || data.month_pct != null) && (
+                <div className="subrange">
+                  <span className={`rp ${upDownClass(data.week_pct)}`} title="近5个交易日（≈1周）涨跌幅">周 {fmtPct(data.week_pct)}</span>
+                  <span className={`rp ${upDownClass(data.month_pct)}`} title="近20个交易日（≈1月）涨跌幅">月 {fmtPct(data.month_pct)}</span>
+                </div>
+              )}
             </div>
             <button className="row-remove" onClick={(e) => { e.stopPropagation(); onRemove(data.code) }} title="从自选池移除">×</button>
           </div>

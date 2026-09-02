@@ -30,6 +30,24 @@ def _r(x, nd=4):
     return round(x, nd)
 
 
+def _chg_pct(closes, n):
+    """近 n 个交易日累计涨跌幅（%）。closes 为按日期升序的收盘价序列。
+
+    周涨跌 ≈ n=5（近5个交易日）；月涨跌 ≈ n=20（近20个交易日）。
+    数据不足 / 除零 / NaN 一律返回 None（前端显示 —）。
+    """
+    try:
+        if closes is None or len(closes) <= n:
+            return None
+        a = float(closes.iloc[-1 - n])
+        b = float(closes.iloc[-1])
+        if not math.isfinite(a) or not math.isfinite(b) or a == 0:
+            return None
+        return round((b / a - 1) * 100, 2)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def build_stock_json(code: str, name: str, industry: str) -> dict:
     daily = bf.fetch_daily(code, KLINE_DAYS)
     fund = bf.fetch_fundamentals(code)
@@ -122,6 +140,7 @@ def main():
                 watch.append({
                     "code": code, "name": name, "industry": industry,
                     "price": m.get("price"), "pct": m.get("pct"),
+                    "week_pct": m.get("week_pct"), "month_pct": m.get("month_pct"),
                     "pe": fnd.get("pe_ttm"), "pb": fnd.get("pb"),
                     "roe": fnd.get("roe"), "mktcap": fnd.get("mktcap"),
                     "div_yield": fnd.get("div_yield"),
