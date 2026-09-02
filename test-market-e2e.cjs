@@ -96,16 +96,43 @@ async function shot(page, name) {
   await page.waitForSelector('.chart canvas, .chart', { timeout: 15000 });
   await page.waitForTimeout(2500);
   const commentary = await page.$eval('.commentary', (el) => el.textContent.slice(0, 200)).catch(() => null);
-  console.log('[5] 详情页综合说明:', commentary ? '可见' : '缺失');
+  console.log('[4] 详情页综合说明:', commentary ? '可见' : '缺失');
   if (!commentary) errors.push('commentary block missing');
   await shot(page, 'e2e-3-detail.png');
+
+  // 5b. 市场版兜底详情（点击未加入行 → 市场版评分+解释）
+  await page.evaluate(() => { location.hash = '#/market'; });
+  await page.waitForSelector('.mk-list .mk-item', { timeout: 20000 });
+  await page.waitForTimeout(1200);
+  const noBtn = page.locator('.mk-item.not-added').first();
+  if (await noBtn.count()) {
+    const tCode = await noBtn.locator('.mk-code').textContent();
+    await noBtn.click();
+    await page.waitForSelector('.mk-hero', { timeout: 20000 });
+    await page.waitForTimeout(800);
+    const heroOk = await page.$eval('.mk-hero', (el) => /#/.test(el.textContent) && /评分/.test(el.textContent));
+    const commentOk = await page.$eval('.commentary', (el) => (el.textContent || '').length > 10).catch(() => false);
+    const addBtnOk = !!(await page.$('.fallback-add'));
+    const hasAddBtn = !!addBtnOk;
+    console.log('[5b] 兜底详情 code=' + tCode + ' hero=' + heroOk + ' comment=' + commentOk + ' addBtn=' + hasAddBtn);
+    if (!heroOk) errors.push('市场版兜底 hero 缺失');
+    if (!commentOk) errors.push('市场版兜底 commentary 缺失');
+    if (!addBtnOk) errors.push('市场版兜底加入按钮缺失');
+    await shot(page, 'e2e-5-fallback.png');
+    // 返回市场页（为步骤 6 做准备）
+    await page.evaluate(() => { location.hash = '#/market'; });
+    await page.waitForSelector('.mk-list .mk-item', { timeout: 20000 });
+  } else {
+    console.log('[5b] 无未加入条目可测兜底详情');
+  }
 
   // 6. 友好错误（访问不存在股）
   await page.evaluate(() => { location.hash = '#/stock/sh.999999'; });
   await page.waitForTimeout(3000);
   const errorText = await page.$eval('.error', (el) => el.textContent).catch(() => '');
   console.log('[6] 错误信息:', errorText ? errorText.replace(/\s+/g, ' ').slice(0, 100) : '无');
-  if (!errorText.includes('尚未生成')) errors.push('友好错误信息缺失');
+  // 兼容新旧文案：全市场兜底上线后，"尚未生成"也会保留路径
+  if (!errorText.includes('未找到') && !errorText.includes('尚未生成') && !errorText.includes('扫描范围')) errors.push('友好错误信息缺失');
 
   if (errors.length) {
     console.log('--- ERRORS ---');

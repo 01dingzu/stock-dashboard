@@ -272,6 +272,25 @@ def build_market_all(limit: int = 0) -> list:
             except Exception:  # noqa: BLE001
                 tech = None
         r["commentary"] = build_market_commentary(r, tech)
+        # 技术快照精简并入（供全市场筛选页的"技术形态"条件；无快照 → null）
+        if tech:
+            r["tech"] = {
+                "d": tech.get("date"),
+                "close": tech.get("close"),
+                "ma5": tech.get("ma5"),
+                "ma20": tech.get("ma20"),
+                "ma60": tech.get("ma60"),
+                "rsi6": tech.get("rsi6"),
+                "kdj_j": tech.get("kdj_j"),
+                "dif": tech.get("dif"),
+                "dea": tech.get("dea"),
+                "macd": tech.get("macd"),
+                "macd_gold": tech.get("macd_gold"),
+                "vol_break": tech.get("vol_break"),
+                "break_20d_high": tech.get("break_20d_high"),
+            }
+        else:
+            r["tech"] = None
         out.append(r)
 
     payload = {
@@ -284,7 +303,8 @@ def build_market_all(limit: int = 0) -> list:
     }
     out_f = os.path.join(DATA_DIR, "market_all.json")
     with open(out_f, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=1)
+        # 紧凑分隔符：全市场 4928 只含 commentary，缩小文件体积（indent 会让体积翻倍）
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
     print(f"全市场综合表 → {out_f}（{len(out)} 只 / 全量排名 {len(rows)} 入样）")
     for r in out[:5]:
         print(f"  #{r['rank']} {r['name']} score={r['score']:.3f} {r['commentary'][:60]}…")

@@ -52,6 +52,24 @@ export interface MarketRank {
 // market_all.json：全市场排名 + 每只的综合点评（详情页兜底，无深度数据时展示）
 export interface MarketAllItem extends MarketItem {
   commentary?: string | null
+  tech?: TechSnap | null // 技术面快照（全市场筛选"技术形态"条件；tech_scan 收尾后全量）
+}
+
+// 技术面紧凑快照（tech_scan.py 产出，与详情页指标同口径）
+export interface TechSnap {
+  d: string | null // 快照日期
+  close: number | null
+  ma5: number | null
+  ma20: number | null
+  ma60: number | null
+  rsi6: number | null
+  kdj_j: number | null
+  dif: number | null
+  dea: number | null
+  macd: number | null
+  macd_gold: boolean | null // 近期 MACD 金叉（dif>dea）
+  vol_break: boolean | null // 放量（量 > 5日均量×1.2）
+  break_20d_high: boolean | null // 突破近20日高点
 }
 
 export interface MarketAll {

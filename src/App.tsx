@@ -3,12 +3,14 @@ import { useStore } from './store'
 import StockList from './components/StockList'
 import StockDetail from './components/StockDetail'
 import MarketRankView from './components/MarketRank'
+import ScreenerView from './components/ScreenerView'
 import MarketCard from './components/MarketCard'
 
-// hash 路由：#/ 列表 ｜ #/stock/sh.600519 详情 ｜ #/market 全市场低估清单
-function parseRoute(): { view: 'list' | 'market'; code: string | null } {
+// hash 路由：#/ 列表 ｜ #/stock/sh.600519 详情 ｜ #/market Top50 低估榜 ｜ #/screener 全市场筛选
+function parseRoute(): { view: 'list' | 'market' | 'screener'; code: string | null } {
   const m = location.hash.match(/^#\/stock\/(.+)$/)
   if (m) return { view: 'list', code: m[1] }
+  if (location.hash === '#/screener') return { view: 'screener', code: null }
   if (location.hash === '#/market') return { view: 'market', code: null }
   return { view: 'list', code: null }
 }
@@ -54,13 +56,24 @@ export default function App() {
           {updated && <span className="sub"> · 数据 {updated}</span>}
         </h1>
         {!selected && route.view === 'list' && (
-          <button className="back-btn mk-nav" onClick={() => (location.hash = '#/market')}>全市场低估</button>
+          <button className="back-btn mk-nav" onClick={() => (location.hash = '#/market')}>全市场</button>
         )}
-        {!selected && route.view === 'market' && (
-          <button className="back-btn mk-nav" onClick={() => (location.hash = '#/')}>‹ 自选池</button>
+        {!selected && (route.view === 'market' || route.view === 'screener') && (
+          <button className="back-btn" onClick={() => (location.hash = '#/')}>‹ 自选池</button>
         )}
         {selected && <button className="back-btn" onClick={() => (location.hash = '#/')}>‹ 返回</button>}
       </header>
+
+      {(route.view === 'market' || route.view === 'screener') && (
+        <div className="mk-tabs">
+          <button className={`mk-tab${route.view === 'market' ? ' on' : ''}`} onClick={() => (location.hash = '#/market')}>
+            🏆 Top50 低估榜
+          </button>
+          <button className={`mk-tab${route.view === 'screener' ? ' on' : ''}`} onClick={() => (location.hash = '#/screener')}>
+            🔍 全市场筛选
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="error">
@@ -76,6 +89,13 @@ export default function App() {
 
       {!selected && route.view === 'market' && (
         <MarketRankView
+          dataCodes={dataCodes}
+          localWatch={localWatch}
+          onSelect={(code) => (location.hash = `#/stock/${code}`)}
+        />
+      )}
+      {!selected && route.view === 'screener' && (
+        <ScreenerView
           dataCodes={dataCodes}
           localWatch={localWatch}
           onSelect={(code) => (location.hash = `#/stock/${code}`)}
