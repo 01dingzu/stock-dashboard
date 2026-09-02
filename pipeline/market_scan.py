@@ -187,10 +187,11 @@ def fetch_one(code: str) -> dict | None:
 
 # ---------------- 打分 ----------------
 
-def rank_market(rows: list, top_n: int = 50) -> list:
+def rank_market(rows: list, top_n: int | None = 50) -> list:
     """六因子打分（估值 45% + 盈利 20% + 股息 15% + 负债 10% + 成长 10%）：
     PE/PB 越低分越高、ROE 越高分越高、股息率越高分越高、负债率越低分越高、净利同比越高分越高。
-    缺字段的因子给中性 0.5（不因数据缺失惩罚）。"""
+    缺字段的因子给中性 0.5（不因数据缺失惩罚）。
+    top_n=None 时返回全市场完整排名（供 market_all.json 详情兜底使用）。"""
     df = pd.DataFrame(rows)
     if df.empty:
         return []
@@ -220,7 +221,7 @@ def rank_market(rows: list, top_n: int = 50) -> list:
     df["industry"] = df["industry"].map(clean_industry)
     cols = ["rank", "code", "name", "industry", "close", "pe", "pb", "roe",
             "gpm", "mktcap", "yoy_ni", "debt_ratio", "div_yield", "report", "score"]
-    recs = df[cols].head(top_n).to_dict("records")
+    recs = df[cols].to_dict("records") if top_n is None else df[cols].head(top_n).to_dict("records")
     # 清洗 NaN → None（pandas 缺失值会以 NaN 字面量写入 JSON，前端 JSON.parse 会失败）
     for r in recs:
         for k, v in r.items():

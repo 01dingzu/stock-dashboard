@@ -3,6 +3,7 @@ import { useStore } from './store'
 import StockList from './components/StockList'
 import StockDetail from './components/StockDetail'
 import MarketRankView from './components/MarketRank'
+import MarketCard from './components/MarketCard'
 
 // hash 路由：#/ 列表 ｜ #/stock/sh.600519 详情 ｜ #/market 全市场低估清单
 function parseRoute(): { view: 'list' | 'market'; code: string | null } {
@@ -13,7 +14,7 @@ function parseRoute(): { view: 'list' | 'market'; code: string | null } {
 }
 
 export default function App() {
-  const { watchlist, stock, loading, error, localWatch, loadWatchlist, loadStock, removeLocal } = useStore()
+  const { watchlist, stock, fallback, marketMeta, loading, error, localWatch, loadWatchlist, loadStock, removeLocal } = useStore()
   const [route, setRoute] = useState(parseRoute())
   const selected = route.code
 
@@ -27,7 +28,7 @@ export default function App() {
 
   useEffect(() => {
     if (route.view === 'list' && selected) loadStock(selected)
-    else useStore.setState({ stock: null })
+    else useStore.setState({ stock: null, fallback: null, marketMeta: null })
   }, [route.view, selected, loadStock])
 
   // Service Worker（PWA 离线缓存）
@@ -64,8 +65,11 @@ export default function App() {
       {error && (
         <div className="error">
           ⚠ {error}
-          <br />
-          {error.includes('加载失败') ? '该股详情数据尚未生成。若已在自选池，请在「全市场低估」页复制代码清单发给助理生成数据。' : '数据可能尚未生成，先运行 pipeline/main.py 或等待 GitHub Actions。'}
+          {error.includes('未找到') ? (
+            <><br />可回「全市场低估」页浏览其他标的；或将该股加入自选池，详情数据会随后台管道生成。</>
+          ) : (
+            <><br />数据可能尚未生成，稍后重试或运行 pipeline 管道。</>
+          )}
         </div>
       )}
       {loading && !stock && route.view === 'list' && <div className="loading">加载中…</div>}
@@ -92,6 +96,9 @@ export default function App() {
         />
       )}
       {selected && stock && <StockDetail data={stock} onBack={() => (location.hash = '#/')} />}
+      {selected && !stock && fallback && marketMeta && (
+        <MarketCard item={fallback} meta={marketMeta} onBack={() => (location.hash = '#/')} />
+      )}
     </div>
   )
 }

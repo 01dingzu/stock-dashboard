@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { fetchStock, fetchWatchlist } from './api'
-import type { StockData, Watchlist } from './types'
+import { fetchMarketAll, fetchStock, fetchWatchlist } from './api'
+import type { MarketAllItem, StockData, Watchlist } from './types'
 
 // 自选池本地条目（真相来源：localStorage；后端 watchlist.json 只标记"详情数据可用性"）
 export interface LocalItem {
@@ -25,9 +25,17 @@ function writeLocal(items: LocalItem[]) {
   localStorage.setItem(LOCAL_KEY, JSON.stringify(items))
 }
 
+interface MarketMeta {
+  updated: string
+  universe: number
+  note: string
+}
+
 interface State {
   watchlist: Watchlist | null
   stock: StockData | null
+  fallback: MarketAllItem | null // 无深度数据时的"市场版"兜底条目（全市场打分+解释）
+  marketMeta: MarketMeta | null
   loading: boolean
   error: string | null
   localWatch: LocalItem[]
@@ -40,6 +48,8 @@ interface State {
 export const useStore = create<State>((set) => ({
   watchlist: null,
   stock: null,
+  fallback: null,
+  marketMeta: null,
   loading: false,
   error: null,
   localWatch: readLocal(),
@@ -78,9 +88,26 @@ export const useStore = create<State>((set) => ({
     set({ loading: true, error: null })
     try {
       const s = await fetchStock(code)
-      set({ stock: s, loading: false })
-    } catch (e) {
-      set({ error: e instanceof Error ? e.message : String(e), loading: false })
+      set({ stock: s, fallback: null, marketMeta: null, loading: false })
+    } catch {
+      // 深度详情缺失（非自选池/未生成）→ 兜底展示"市场版"全量打分+解释
+      try {
+        const all = await fetchMarketAll()
+        const item = all.stocks.find((i) => i.code === code) ?? null
+        if (item) {
+          set({
+            stock: null,
+            fallback: item,
+            marketMeta: { updated: all.updated, universe: all.universe, note: all.note },
+            loading: false,
+            error: null,
+          })
+        } else {
+          set({ stock: null, fallback: null, marketMeta: null, error: `未找到 ${code}：该股可能已退市、新上市或不在全市场扫描范围。`, loading: false })
+        }
+      } catch (e) {
+        set({ stock: null, fallback: null, marketMeta: null, error: e instanceof Error ? e.message : String(e), loading: false })
+      }
     }
   },
 

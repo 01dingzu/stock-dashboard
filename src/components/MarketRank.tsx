@@ -69,13 +69,17 @@ export default function MarketRankView({ dataCodes, localWatch, onSelect }: Prop
         {data.stocks.map((s) => {
           const hasData = dataCodes?.has(s.code) ?? false
           const isAdded = localWatch?.some((p) => p.code === s.code) ?? false
-          const clickable = isAdded && hasData
+          const hint = isAdded
+            ? hasData
+              ? `查看 ${s.name} 详情（深度版）`
+              : `${s.name} 已加入自选池，详情数据待同步（当前展示市场版）`
+            : `查看 ${s.name} 的全市场评分与解释`
           return (
             <div
-              className={`mk-item${isAdded ? (hasData ? ' added clickable' : ' added') : ' not-added'}`}
+              className={`mk-item clickable${isAdded ? (hasData ? ' added' : ' added') : ' not-added'}`}
               key={s.code}
-              onClick={clickable ? () => onSelect(s.code) : undefined}
-              title={clickable ? `查看 ${s.name} 详情` : isAdded ? `${s.name} 已加入自选池，详情数据待同步` : `${s.name} 未加入自选池，点 ＋ 加入`}
+              onClick={() => onSelect(s.code)}
+              title={hint}
             >
               <div className="mk-rank">{s.rank}</div>
               <div className="mk-main">

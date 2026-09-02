@@ -49,6 +49,20 @@ export interface MarketRank {
   stocks: MarketItem[]
 }
 
+// market_all.json：全市场排名 + 每只的综合点评（详情页兜底，无深度数据时展示）
+export interface MarketAllItem extends MarketItem {
+  commentary?: string | null
+}
+
+export interface MarketAll {
+  updated: string
+  source: string
+  note: string
+  universe: number
+  count: number
+  stocks: MarketAllItem[]
+}
+
 export interface KBar {
   d: string
   o: number

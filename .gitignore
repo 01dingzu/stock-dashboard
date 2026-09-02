@@ -8,6 +8,7 @@ __pycache__/
 .DS_Store
 data/backtest_cache/
 data/market_cache/
+data/tech_cache/
 
 shot-*.png
 e2e-*.png

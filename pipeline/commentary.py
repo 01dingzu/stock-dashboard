@@ -4,6 +4,10 @@
 输入：data/stocks/*.json（详情数据，由 baostock_fetch.py 生成）
 输出：data/commentary.json（每只股票一段中文点评）
 
+市场全量版（--market）：
+输入：data/market_cache/*.json（schema=2 六因子）+ data/tech_cache/*.json（技术快照）
+输出：data/market_all.json —— 全市场每只的 排名/六因子/综合点评（详情页兜底用）
+
 规则依据（来自 backtest_report.md 的因子回测结论）：
 - 有效因子：PE_TTM / PB 越低越好（IR≈-0.4，分层单调）
 - 股息率 TTM 越高，安全边际越厚
@@ -16,7 +20,12 @@ import os
 
 from config import DATA_DIR
 
-FIN = {"银行", "保险", "证券", "券商", "多元金融", "信托"}  # 金融行业：高负债率是行业特性，不做风险提示
+# 金融行业关键词（负债率高是行业特性，不做风险提示；BaoStock 行业名如"货币金融服务/保险业/资本市场服务"）
+FIN_KEYS = ("银行", "货币金融", "保险", "证券", "券商", "多元金融", "信托")
+
+
+def _is_fin(industry: str) -> bool:
+    return bool(industry) and any(k in str(industry) for k in FIN_KEYS)
 
 
 def load_stock(path: str) -> dict:
@@ -98,7 +107,7 @@ def fundamental_part(fd: dict, industry: str) -> list:
         lines.append("成长： " + "，".join(grow) + "。")
 
     # ---- 风险（负债率，金融行业豁免）----
-    if debt is not None and industry not in FIN:
+    if debt is not None and not _is_fin(industry):
         if debt > 80:
             lines.append(f"注意负债率 {debt:.0f}% 偏高。")
     return lines
@@ -174,7 +183,127 @@ def safe_commentary(stock: dict):
         return None
 
 
+# ---------------- 市场全量版（data/market_cache + data/tech_cache） ----------------
+
+# market_cache(schema=2) 字段 → fundamentals 字段名映射（缺失/不适用的字段置 None 自动省略句子）
+def market_fd(cache: dict) -> dict:
+    return {
+        "pe_ttm": cache.get("pe"),
+        "pb": cache.get("pb"),
+        "div_yield": cache.get("div_yield"),
+        "roe": cache.get("roe"),
+        "np_margin": None,          # 市场版未拉净利率 → 该句省略
+        "yoy_ni": cache.get("yoy_ni"),
+        "yoy_rev": None,            # 市场版未拉营收同比 → 该句省略
+        "debt_ratio": cache.get("debt_ratio"),
+    }
+
+
+def market_technical_text(tech: dict | None) -> list:
+    """市场版技术面：把紧凑快照构造成与 detail 同构的伪 stock dict，复用 technical_part（口径一致）。
+    快照字段缺失/损坏时返回空列表（只输出基本面段，不阻断）。"""
+    if not tech:
+        return []
+    try:
+        fake = {
+            "kline": [{"c": tech["close"], "ma5": tech.get("ma5"), "ma20": tech.get("ma20"),
+                       "ma60": tech.get("ma60"), "boll_up": tech.get("boll_up")}],
+            "rsi": [{"rsi6": tech.get("rsi6"), "rsi12": tech.get("rsi12")}],
+            "kdj": [{"kdj_j": tech.get("kdj_j")}],
+            "macd": [{"macd": tech.get("macd"), "dif": tech.get("dif"), "dea": tech.get("dea")}],
+            "factors": [
+                {"key": "macd_gold", "value": tech.get("macd_gold")},
+                {"key": "vol_break", "value": tech.get("vol_break")},
+                {"key": "break_20d_high", "value": tech.get("break_20d_high")},
+            ],
+        }
+        return technical_part(fake)
+    except Exception:  # noqa: BLE001 —— 指标不全时不输出技术面，不阻断
+        return []
+
+
+def build_market_commentary(cache: dict, tech: dict | None) -> str | None:
+    """market_cache 记录 + 技术快照 → 市场版点评文字。字段缺失自动跳过；失败返回 None。"""
+    try:
+        name = cache.get("name") or cache.get("code")
+        industry = cache.get("industry", "")
+        parts = fundamental_part(market_fd(cache), industry)
+        parts += market_technical_text(tech)
+        if not parts:
+            return None
+        return f"{name}（{industry}）：" + "".join(parts)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def build_market_all(limit: int = 0) -> list:
+    """全市场综合输出：六因子全量排名（复用 market_scan.rank_market top_n=None）+ 技术快照
+    → 每只附 commentary → 写 data/market_all.json（详情页兜底数据）。
+    market_rank.json（Top50）仍由 market_scan.py 产出，两者互补。"""
+    import datetime as dt
+    from market_scan import rank_market  # 延迟导入：仅本函数需要，避免 import 顺序耦合
+
+    cache_dir = os.path.join(DATA_DIR, "market_cache")
+    tech_dir = os.path.join(DATA_DIR, "tech_cache")
+    rows = []
+    for f in sorted(glob.glob(os.path.join(cache_dir, "*.json"))):
+        base = os.path.basename(f)
+        if base in ("universe.json", "industry_map.json"):
+            continue
+        try:
+            with open(f, encoding="utf-8") as fh:
+                d = json.load(fh)
+        except Exception:  # noqa: BLE001
+            continue
+        if d.get("schema") == 2 and d.get("code"):
+            rows.append(d)
+    recs = rank_market(rows, top_n=None)  # 全市场完整排名（含 rank/score 及全部因子）
+    if limit:
+        recs = recs[:limit]
+
+    out = []
+    for r in recs:
+        tech = None
+        tf = os.path.join(tech_dir, f"{r['code'].replace('.', '')}.json")
+        if os.path.exists(tf):
+            try:
+                with open(tf, encoding="utf-8") as fh:
+                    tech = json.load(fh)
+            except Exception:  # noqa: BLE001
+                tech = None
+        r["commentary"] = build_market_commentary(r, tech)
+        out.append(r)
+
+    payload = {
+        "updated": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "source": "BaoStock 全市场扫描 v2 + 技术面快照",
+        "note": "六因子评分：PE 25% + PB 20%（越低越好）· ROE 20%（越高越好）· 股息率 15% · 负债率 10%（越低越好）· 净利同比 10%；综合说明为规则模板。仅作观察，不构成投资建议",
+        "universe": len(rows),
+        "count": len(out),
+        "stocks": out,
+    }
+    out_f = os.path.join(DATA_DIR, "market_all.json")
+    with open(out_f, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=1)
+    print(f"全市场综合表 → {out_f}（{len(out)} 只 / 全量排名 {len(rows)} 入样）")
+    for r in out[:5]:
+        print(f"  #{r['rank']} {r['name']} score={r['score']:.3f} {r['commentary'][:60]}…")
+    return out
+
+
+# ---------------- CLI ----------------
+
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--market", action="store_true", help="全市场模式：生成 data/market_all.json")
+    ap.add_argument("--limit", type=int, default=0, help="市场模式只处理前 N 名（测试用）")
+    args = ap.parse_args()
+
+    if args.market:
+        build_market_all(limit=args.limit)
+        return
+
     out = []
     for path in sorted(glob.glob(os.path.join(DATA_DIR, "stocks", "*.json"))):
         stock = load_stock(path)
