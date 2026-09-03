@@ -219,6 +219,11 @@ body {
   border: 1px solid #f59e0b; border-radius: 8px; padding: 1px 5px;
   margin-left: 6px; vertical-align: 2px;
 }
+.snap-tag {
+  display: inline-block; font-size: 10px; font-weight: 600; color: #64748b;
+  border: 1px solid #94a3b8; border-radius: 8px; padding: 1px 5px;
+  margin-left: 6px; vertical-align: 2px;
+}
 .up { color: var(--up); }
 .down { color: var(--down); }
 .flat { color: var(--text-dim); }

@@ -61,6 +61,9 @@ export interface MarketAllItem extends MarketItem {
 export interface TechSnap {
   d: string | null // 快照日期
   close: number | null
+  pct: number | null // 当日涨跌幅 %
+  week_pct: number | null // 近5交易日（≈1周）涨跌幅 %
+  month_pct: number | null // 近20交易日（≈1月）涨跌幅 %
   ma5: number | null
   ma20: number | null
   ma60: number | null
@@ -72,6 +75,14 @@ export interface TechSnap {
   macd_gold: boolean | null // 近期 MACD 金叉（dif>dea）
   vol_break: boolean | null // 放量（量 > 5日均量×1.2）
   break_20d_high: boolean | null // 突破近20日高点
+}
+
+// 紧凑全市场价格快照（commentary.build_market_px 产出）：code → [收盘, 当日%, 周%, 月%]
+export type PxTuple = [close: number | null, pct: number | null, week_pct: number | null, month_pct: number | null]
+export interface MarketPx {
+  updated: string
+  universe: number
+  px: Record<string, PxTuple>
 }
 
 export interface MarketAll {

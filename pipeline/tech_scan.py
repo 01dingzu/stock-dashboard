@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-全市场技术面快照扫描 v1
+全市场技术面快照扫描 v2
 数据源：BaoStock 前复权日线（每只 ~250 根，一次接口调用）
 输入：data/market_cache/*.json 中 schema=2 的因子缓存（= 全市场名单，已剔 ST/退市/次新）
-输出：data/tech_cache/{code}.json —— 紧凑技术快照（~300B/只）：
-      {code, date, close, ma5, ma20, ma60, boll_up, rsi6, rsi12, kdj_j,
-       dif, dea, macd, macd_gold, vol_break, break_20d_high, schema: 1}
-供 commentary.build_market_all 生成全市场"技术面解释"（与详情页同规则，指标口径一致）。
+输出：data/tech_cache/{code}.json —— 紧凑技术快照（~400B/只）：
+      {code, date, close, pct, week_pct, month_pct,
+       ma5, ma20, ma60, boll_up, rsi6, rsi12, kdj_j,
+       dif, dea, macd, macd_gold, vol_break, break_20d_high, schema: 2}
+  pct=当日涨跌幅%；week_pct=近5交易日累计涨跌%；month_pct=近20交易日累计涨跌%
+  （与详情页/默认池 watchlist 的周/月口径一致：close[-1] vs close[-1-n]）
+供 commentary.build_market_all 生成全市场"技术面解释"与自选池任意股的周/月涨跌（详情兜底同规则）。
 
 与 market_cache 分开存放：v2 因子扫描仍在写 market_cache，本脚本并发写独立目录互不冲突。
-特性：断点续传（文件已存在且 schema=1 则跳过）；--limit 供小样本测试；网络错误重登重试。
+特性：断点续传（文件已存在且 schema=2 则跳过）；schema 升级（1→2）后旧缓存自动失效重扫；
+      --limit 供小样本测试；网络错误重登重试。
 运行：python pipeline/tech_scan.py [--limit N] [--force]
 """
 
@@ -44,7 +48,11 @@ def _r(x, nd=4):
 
 
 def snapshot(code: str) -> dict | None:
-    """单只：拉日线 → 全指标 → 提取最后一根的快照字段（与 main.py 的 factors 规则一致）。"""
+    """单只：拉日线 → 全指标 → 提取最后一根的快照字段（与 main.py 的 factors 规则一致）。
+
+    schema 2 起附带 pct（当日涨跌幅）/ week_pct（近5交易日）/ month_pct（近20交易日），
+    供自选池任意股在列表行展示周/月涨跌（与默认池 watchlist 口径一致：close[-1] vs close[-1-n]）。
+    """
     daily = bf.fetch_daily(code, days=KLINE_DAYS)  # 内部已做会话重登管理
     if daily.empty:
         return None
@@ -54,10 +62,14 @@ def snapshot(code: str) -> dict | None:
     macd_gold = bool(_r(last["dif"], 6) > _r(last["dea"], 6)) if not _isna(last["dea"]) else None
     vol_break = bool(last["volume"] > 1.2 * last["vol_ma5"]) if not _isna(last["vol_ma5"]) else None
     break20 = bool(last["close"] >= ind["high"].tail(20).max()) if len(ind) >= 20 else None
+    closes = ind["close"]
     return {
         "code": code,
         "date": str(last["date"]),
         "close": _r(last["close"], 2),
+        "pct": _r(last.get("pctChg"), 2) if "pctChg" in ind.columns else None,
+        "week_pct": _chg_pct(closes, 5),   # 近5交易日（≈1周）
+        "month_pct": _chg_pct(closes, 20),  # 近20交易日（≈1月）
         "ma5": _r(last["ma5"], 2),
         "ma20": _r(last["ma20"], 2),
         "ma60": _r(last["ma60"], 2),
@@ -71,8 +83,22 @@ def snapshot(code: str) -> dict | None:
         "macd_gold": macd_gold,
         "vol_break": vol_break,
         "break_20d_high": break20,
-        "schema": 1,
+        "schema": 2,
     }
+
+
+def _chg_pct(closes, n: int) -> float | None:
+    """近 n 个交易日累计涨跌幅（%）。与 pipeline/main.py 的 _chg_pct 同口径。"""
+    try:
+        if closes is None or len(closes) <= n:
+            return None
+        a = float(closes.iloc[-1 - n])
+        b = float(closes.iloc[-1])
+        if not math.isfinite(a) or not math.isfinite(b) or a == 0:
+            return None
+        return round((b / a - 1) * 100, 2)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _isna(v) -> bool:
@@ -123,7 +149,7 @@ def main() -> None:
                 try:
                     with open(f, encoding="utf-8") as fh:
                         cached = json.load(fh)
-                    if cached.get("schema") == 1:
+                    if cached.get("schema") == 2:
                         skipped += 1
                         continue
                 except Exception:  # noqa: BLE001 —— 缓存损坏则重拉

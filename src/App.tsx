@@ -5,6 +5,8 @@ import StockDetail from './components/StockDetail'
 import MarketRankView from './components/MarketRank'
 import ScreenerView from './components/ScreenerView'
 import MarketCard from './components/MarketCard'
+import { fetchMarketPx } from './api'
+import type { PxTuple } from './types'
 
 // hash 路由：#/ 列表 ｜ #/stock/sh.600519 详情 ｜ #/market Top50 低估榜 ｜ #/screener 全市场筛选
 function parseRoute(): { view: 'list' | 'market' | 'screener'; code: string | null } {
@@ -18,6 +20,7 @@ function parseRoute(): { view: 'list' | 'market' | 'screener'; code: string | nu
 export default function App() {
   const { watchlist, stock, fallback, marketMeta, loading, error, localWatch, loadWatchlist, loadStock, removeLocal } = useStore()
   const [route, setRoute] = useState(parseRoute())
+  const [pxMap, setPxMap] = useState<Map<string, PxTuple> | null>(null)
   const selected = route.code
 
   useEffect(() => {
@@ -27,6 +30,21 @@ export default function App() {
     window.addEventListener('hashchange', refresh)
     return () => window.removeEventListener('hashchange', refresh)
   }, [loadWatchlist])
+
+  // 紧凑全市场价格快照（自选池任意股的收盘/当日/周/月查询表，~200KB 单次拉取）
+  useEffect(() => {
+    let on = true
+    fetchMarketPx()
+      .then((m) => {
+        if (on) setPxMap(new Map(Object.entries(m.px)))
+      })
+      .catch(() => {
+        if (on) setPxMap(new Map())
+      })
+    return () => {
+      on = false
+    }
+  }, [])
 
   useEffect(() => {
     if (route.view === 'list' && selected) loadStock(selected)
@@ -46,12 +64,13 @@ export default function App() {
   }, [])
 
   const updated = watchlist?.updated
-  // 后端 watchlist.json = "详情数据可用" 标记集合
+  // 后端 watchlist.json = "详情数据可用" 标记集合（深度 K 线：默认池 20 只）
   const dataCodes = new Set(watchlist?.stocks.map((s) => s.code) ?? [])
   // 自选池真相 = localWatch（localStorage），合并后端行情数据
   const watchMap = new Map((watchlist?.stocks ?? []).map((s) => [s.code, s]))
   const listItems = localWatch.map((l) => ({ local: l, data: watchMap.get(l.code) ?? null }))
-  const pendingItems = localWatch.filter((l) => !dataCodes.has(l.code))
+  // 真正"无任何数据"的待同步股 = 无深度 K 线 && 无市场快照（px 未就绪时不误报）
+  const pendingItems = pxMap ? localWatch.filter((l) => !dataCodes.has(l.code) && !pxMap.has(l.code)) : []
 
   return (
     <div className="app">
@@ -93,7 +112,7 @@ export default function App() {
         <div className="error">
           ⚠ {error}
           {error.includes('未找到') ? (
-            <><br />可回「全市场低估」页浏览其他标的；或将该股加入自选池，详情数据会随后台管道生成。</>
+            <><br />该股可能已退市、新上市或不在全市场扫描范围。可回「全市场筛选」页浏览其他标的。</>
           ) : (
             <><br />数据可能尚未生成，稍后重试或运行 pipeline 管道。</>
           )}
@@ -117,14 +136,15 @@ export default function App() {
       )}
       {!selected && route.view === 'list' && pendingItems.length > 0 && (
         <div className="pending-banner" onClick={() => (location.hash = '#/market')}>
-          📌 <b>{pendingItems.length}</b> 只待同步：{pendingItems.map((i) => i.name).join('、')}
+          📌 <b>{pendingItems.length}</b> 只暂无行情数据：{pendingItems.map((i) => i.name).join('、')}
           <br />
-          去「全市场低估」页复制代码清单发给助理，即可生成详情数据并入池 ›
+          可能为新上市/退市/未被扫描覆盖，去「全市场筛选」看看 ›
         </div>
       )}
       {!selected && route.view === 'list' && (
         <StockList
           items={listItems}
+          pxMap={pxMap}
           onSelect={(code) => (location.hash = `#/stock/${code}`)}
           onRemove={removeLocal}
         />

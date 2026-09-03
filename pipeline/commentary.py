@@ -277,6 +277,9 @@ def build_market_all(limit: int = 0) -> list:
             r["tech"] = {
                 "d": tech.get("date"),
                 "close": tech.get("close"),
+                "pct": tech.get("pct"),           # 当日涨跌幅 %
+                "week_pct": tech.get("week_pct"),  # 近5交易日（≈1周）涨跌幅 %
+                "month_pct": tech.get("month_pct"),  # 近20交易日（≈1月）涨跌幅 %
                 "ma5": tech.get("ma5"),
                 "ma20": tech.get("ma20"),
                 "ma60": tech.get("ma60"),
@@ -311,6 +314,37 @@ def build_market_all(limit: int = 0) -> list:
     return out
 
 
+def build_market_px() -> dict:
+    """紧凑全市场价格快照（供自选池任意股列表行显示 收盘/当日/周/月 涨跌，无需拉 3MB market_all）。
+
+    从 tech_cache（schema=2，已含 pct/week_pct/month_pct）汇总为
+    {code: [close, pct, week_pct, month_pct]} —— 每只 ~40B，全市场 ~200KB。
+    与 build_market_all 同源；market_all 面向详情兜底/筛选页，本文件面向自选池列表行。
+    """
+    import datetime as dt
+
+    tech_dir = os.path.join(DATA_DIR, "tech_cache")
+    px = {}
+    for f in sorted(glob.glob(os.path.join(tech_dir, "*.json"))):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                t = json.load(fh)
+        except Exception:  # noqa: BLE001
+            continue
+        if t.get("schema") == 2 and t.get("code"):
+            px[t["code"]] = [t.get("close"), t.get("pct"), t.get("week_pct"), t.get("month_pct")]
+    payload = {
+        "updated": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "universe": len(px),
+        "px": px,
+    }
+    out_f = os.path.join(DATA_DIR, "market_px.json")
+    with open(out_f, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"全市场价格快照 → {out_f}（{len(px)} 只，{os.path.getsize(out_f) // 1024} KB）")
+    return px
+
+
 # ---------------- CLI ----------------
 
 def main() -> None:
@@ -322,6 +356,7 @@ def main() -> None:
 
     if args.market:
         build_market_all(limit=args.limit)
+        build_market_px()
         return
 
     out = []

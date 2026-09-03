@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react'
-import type { WatchItem } from '../types'
+import type { PxTuple, WatchItem } from '../types'
 import { fmtNum, fmtPct, upDownClass } from './FundCard'
 import type { LocalItem } from '../store'
 
 export interface ListRow {
   local: LocalItem
-  data: WatchItem | null // null = 已加入自选池但后端详情数据未生成（待同步）
+  data: WatchItem | null // null = 非后端深度跟踪股（有市场快照则行内显示 收盘/当日/周/月）
 }
 
 interface Props {
   items: ListRow[]
+  pxMap?: Map<string, PxTuple> | null // 全市场价格快照 code → [收盘, 当日%, 周%, 月%]
   onSelect: (code: string) => void
   onRemove: (code: string) => void
 }
@@ -58,39 +59,72 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'div', label: '股息率↓' },
 ]
 
-export default function StockList({ items, onSelect, onRemove }: Props) {
+// 统一行取值：深度数据(data)优先，缺则回退市场快照(px)
+interface RowV {
+  local: LocalItem
+  data: WatchItem | null
+  px: PxTuple | undefined
+  snap: boolean // 有市场快照、无深度数据
+  price: number | null
+  pct: number | null
+  week: number | null
+  month: number | null
+  pe: number | null
+  divYield: number | null
+}
+
+export default function StockList({ items, pxMap, onSelect, onRemove }: Props) {
   const [sort, setSort] = useState<SortKey>('default')
   const withData = useMemo(() => items.filter((r) => r.data), [items])
   const scores = useMemo(() => estimateScore(withData.map((r) => r.data as WatchItem)), [withData])
 
-  // 周/月涨跌汇总：涨跌家数 + 平均涨跌幅（仅统计有周/月数据的行）
-  const stats = useMemo(() => {
-    const arr = withData.map((r) => r.data as WatchItem)
-    const group = (key: 'week_pct' | 'month_pct') => {
-      const vals = arr.map((s) => s[key]).filter((v): v is number => v != null && Number.isFinite(v))
-      if (vals.length === 0) return null
+  const vals = useMemo<RowV[]>(() => {
+    return items.map((r) => {
+      const deep = !!r.data
+      const px = deep ? undefined : pxMap?.get(r.local.code)
       return {
-        n: vals.length,
-        up: vals.filter((v) => v > 0).length,
-        down: vals.filter((v) => v < 0).length,
-        avg: vals.reduce((a, b) => a + b, 0) / vals.length,
+        local: r.local,
+        data: r.data,
+        px,
+        snap: !deep && !!px,
+        price: r.data ? r.data.price : (px?.[0] ?? null),
+        pct: r.data ? r.data.pct : (px?.[1] ?? null),
+        week: r.data ? (r.data.week_pct ?? null) : (px?.[2] ?? null),
+        month: r.data ? (r.data.month_pct ?? null) : (px?.[3] ?? null),
+        pe: r.data ? r.data.pe : null,
+        divYield: r.data ? r.data.div_yield : null,
+      }
+    })
+  }, [items, pxMap])
+
+  // 周/月涨跌汇总：涨跌家数 + 平均涨跌幅（深度行 + 市场快照行都统计）
+  const stats = useMemo(() => {
+    const arr = vals.filter((v) => v.data || v.snap)
+    const group = (key: 'week' | 'month') => {
+      const nums = arr.map((v) => v[key]).filter((x): x is number => x != null && Number.isFinite(x))
+      if (nums.length === 0) return null
+      return {
+        n: nums.length,
+        up: nums.filter((x) => x > 0).length,
+        down: nums.filter((x) => x < 0).length,
+        avg: nums.reduce((a, b) => a + b, 0) / nums.length,
       }
     }
-    return { week: group('week_pct'), month: group('month_pct') }
-  }, [withData])
+    return { week: group('week'), month: group('month') }
+  }, [vals])
 
-  // 排序仅作用于"有数据"的行；"待同步"行固定排在后面
+  // 排序：有行情行（深度+快照）参与，真正无数据行恒沉底
   const rows = useMemo(() => {
-    const arr = [...withData]
-    if (sort === 'score') arr.sort((a, b) => (scores.get(a.data!.code) ?? 999) - (scores.get(b.data!.code) ?? 999))
-    if (sort === 'pct') arr.sort((a, b) => (b.data!.pct ?? -Infinity) - (a.data!.pct ?? -Infinity))
-    if (sort === 'week') arr.sort((a, b) => (b.data!.week_pct ?? -Infinity) - (a.data!.week_pct ?? -Infinity))
-    if (sort === 'month') arr.sort((a, b) => (b.data!.month_pct ?? -Infinity) - (a.data!.month_pct ?? -Infinity))
-    if (sort === 'pe') arr.sort((a, b) => (a.data!.pe ?? Infinity) - (b.data!.pe ?? Infinity))
-    if (sort === 'div') arr.sort((a, b) => (b.data!.div_yield ?? -Infinity) - (a.data!.div_yield ?? -Infinity))
-    const pendings = items.filter((r) => !r.data)
-    return [...arr, ...pendings]
-  }, [withData, items, sort, scores])
+    const body = vals.filter((v) => v.data || v.snap)
+    const pending = vals.filter((v) => !v.data && !v.snap)
+    if (sort === 'score') body.sort((a, b) => ((a.data ? scores.get(a.local.code) ?? 999 : 999)) - ((b.data ? scores.get(b.local.code) ?? 999 : 999)))
+    if (sort === 'pct') body.sort((a, b) => (b.pct ?? -Infinity) - (a.pct ?? -Infinity))
+    if (sort === 'week') body.sort((a, b) => (b.week ?? -Infinity) - (a.week ?? -Infinity))
+    if (sort === 'month') body.sort((a, b) => (b.month ?? -Infinity) - (a.month ?? -Infinity))
+    if (sort === 'pe') body.sort((a, b) => (a.pe ?? Infinity) - (b.pe ?? Infinity))
+    if (sort === 'div') body.sort((a, b) => (b.divYield ?? -Infinity) - (a.divYield ?? -Infinity))
+    return [...body, ...pending]
+  }, [vals, sort, scores])
 
   return (
     <div className="list">
@@ -126,58 +160,63 @@ export default function StockList({ items, onSelect, onRemove }: Props) {
         ))}
         <span className="hint">周≈近5交易日 · 月≈近20交易日 · 估值分=PE/PB百分位 · 点 × 移除自选</span>
       </div>
-      {rows.map(({ local, data }) => {
-        if (!data) {
+      {rows.map((v) => {
+        // 真正无数据（无深度 K 线也无市场快照）
+        if (!v.data && !v.snap) {
           return (
-            <div className="stock-row pending" key={local.code} title={`${local.name} 详情数据待同步：在市场页复制代码清单发给助理`}>
+            <div className="stock-row pending" key={v.local.code} title={`${v.local.name} 暂无行情数据（可能新上市/退市/未覆盖）`}>
               <div>
                 <div className="name">
-                  {local.name}
-                  <span className="sync-pending-tag">待同步</span>
+                  {v.local.name}
+                  <span className="sync-pending-tag">无数据</span>
                 </div>
                 <div className="code">
-                  {local.code.replace(/(sh|sz)\./, '')}
-                  <span className="industry">{local.industry}</span>
+                  {v.local.code.replace(/(sh|sz)\./, '')}
+                  <span className="industry">{v.local.industry}</span>
                 </div>
               </div>
               <div className="spacer" />
-              <button className="row-remove" onClick={(e) => { e.stopPropagation(); onRemove(local.code) }} title="从自选池移除">×</button>
+              <button className="row-remove" onClick={(e) => { e.stopPropagation(); onRemove(v.local.code) }} title="从自选池移除">×</button>
             </div>
           )
         }
-        const stale = staleDays(data.last_date)
-        const sc = scores.get(data.code)
+        const isSnap = !v.data && v.snap
+        const stale = v.data ? staleDays(v.data.last_date) : 0
+        const sc = v.data ? scores.get(v.data.code) : undefined
+        const code = v.data?.code ?? v.local.code
+        const name = v.data?.name ?? v.local.name
         return (
-          <div className="stock-row" key={data.code} onClick={() => onSelect(data.code)}>
+          <div className="stock-row" key={code} onClick={() => onSelect(code)} title={isSnap ? `${name} 市场快照数据（收盘/周月），无深度K线走势图` : undefined}>
             <div>
               <div className="name">
-                {data.name}
-                {data.div_yield != null && data.div_yield > 0 && (
-                  <span className="div-yield">息 {fmtPct(data.div_yield)}</span>
+                {name}
+                {isSnap && <span className="snap-tag">快照</span>}
+                {v.data && v.data.div_yield != null && v.data.div_yield > 0 && (
+                  <span className="div-yield">息 {fmtPct(v.data.div_yield)}</span>
                 )}
                 {sc != null && <span className={`score-tag ${sc >= 60 ? 'good' : sc >= 40 ? 'mid' : 'low'}`}>估值{sc}</span>}
-                {stale > 5 && <span className="stale-tag">行情滞后{data.last_date ? `（${data.last_date.slice(5)}）` : ''}</span>}
+                {stale > 5 && v.data && <span className="stale-tag">行情滞后{v.data.last_date ? `（${v.data.last_date.slice(5)}）` : ''}</span>}
               </div>
               <div className="code">
-                {data.code.replace(/(sh|sz)\./, '')}
-                <span className="industry">{data.industry}</span>
-                <span className="industry">
-                  {data.report_period ? `财报 ${data.report_period}` : ''}
-                </span>
+                {code.replace(/(sh|sz)\./, '')}
+                <span className="industry">{v.local.industry}</span>
+                {v.data && v.data.report_period && (
+                  <span className="industry">财报 {v.data.report_period}</span>
+                )}
               </div>
             </div>
             <div className="spacer" />
             <div className="price">
-              <div className={`p ${upDownClass(data.pct)}`}>{fmtNum(data.price)}</div>
-              <div className={`chg ${upDownClass(data.pct)}`}>{fmtPct(data.pct)}</div>
-              {(data.week_pct != null || data.month_pct != null) && (
+              <div className={`p ${upDownClass(v.pct)}`}>{v.price != null ? fmtNum(v.price) : '—'}</div>
+              {v.pct != null && <div className={`chg ${upDownClass(v.pct)}`}>{fmtPct(v.pct)}</div>}
+              {(v.week != null || v.month != null) && (
                 <div className="subrange">
-                  <span className={`rp ${upDownClass(data.week_pct)}`} title="近5个交易日（≈1周）涨跌幅">周 {fmtPct(data.week_pct)}</span>
-                  <span className={`rp ${upDownClass(data.month_pct)}`} title="近20个交易日（≈1月）涨跌幅">月 {fmtPct(data.month_pct)}</span>
+                  <span className={`rp ${upDownClass(v.week)}`} title="近5个交易日（≈1周）涨跌幅">周 {v.week != null ? fmtPct(v.week) : '—'}</span>
+                  <span className={`rp ${upDownClass(v.month)}`} title="近20个交易日（≈1月）涨跌幅">月 {v.month != null ? fmtPct(v.month) : '—'}</span>
                 </div>
               )}
             </div>
-            <button className="row-remove" onClick={(e) => { e.stopPropagation(); onRemove(data.code) }} title="从自选池移除">×</button>
+            <button className="row-remove" onClick={(e) => { e.stopPropagation(); onRemove(code) }} title="从自选池移除">×</button>
           </div>
         )
       })}
